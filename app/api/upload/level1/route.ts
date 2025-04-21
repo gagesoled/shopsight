@@ -1,157 +1,148 @@
-import { NextResponse } from "next/server"
-import { parse } from "csv-parse/sync"
+import { NextResponse, type NextRequest } from "next/server"
+import { parseLevel1Data } from "@/lib/parsers/unified-parser"
+import Papa from 'papaparse'
+import { mapToLevel1Schema } from "@/lib/parsers/unified-parser"
 
-// Helper function to validate and parse numeric values
-function parseNumericValue(value: string | undefined, fieldName: string): number | "N/A" {
-  if (!value || value.trim() === "") {
-    console.warn(`Missing value for field: ${fieldName}`)
-    return "N/A"
-  }
-  const parsed = parseFloat(value)
-  return isNaN(parsed) ? "N/A" : parsed
-}
-
-// Helper function to validate and parse array values
-function parseArrayValue(values: (string | undefined)[], fieldName: string): string[] | "N/A" {
-  const validValues = values.filter((v): v is string => v !== undefined && v.trim() !== "")
-  if (validValues.length === 0) {
-    console.warn(`Missing values for field: ${fieldName}`)
-    return "N/A"
-  }
-  return validValues
-}
-
-interface Level1Record {
-  "Customer Need": string;
-  "Top Search Term 1": string;
-  "Top Search Term 2": string;
-  "Top Search Term 3": string;
-  "Search Volume (Past 360 days)": string;
-  "Search Volume Growth (Past 180 days)": string;
-  "Search Volume (Past 90 days)": string;
-  "Search Volume Growth (Past 90 days)": string;
-  "Units Sold Lower Bound (Past 360 days)": string;
-  "Units Sold Upper Bound (Past 360 days)": string;
-  "Range of Average Units Sold Lower Bound (Past 360 days)": string;
-  "Range of Average Units Sold Upper Bound (Past 360 days)": string;
-  "# of Top Clicked Products": string;
-  "Average Price (USD)": string;
-  "Minimum Price (Past 360 days) (USD)": string;
-  "Maximum Price (Past 360 days) (USD)": string;
-  "Return Rate (Past 360 days)": string;
-}
-
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
-    const file = formData.get("file") as File
+    const file = formData.get("file") as File | null
 
     if (!file) {
       console.error("No file found in form data")
       return NextResponse.json(
-        { error: "No file uploaded" },
+        { success: false, message: "No file uploaded" },
         { status: 400 }
       )
     }
 
-    console.log("File received:", {
+    console.log("File received for Level 1 processing:", {
       name: file.name,
       type: file.type,
-      size: file.size
+      size: file.size,
     })
 
-    // Read the file content
-    const buffer = await file.arrayBuffer()
-    const content = new TextDecoder().decode(buffer)
+    // Server-side file processing
+    try {
+      // Get the file data as text
+      const buffer = await file.arrayBuffer()
+      const content = new TextDecoder().decode(buffer)
+      
+      // Custom pre-processing to handle metadata at the top of the file
+      let csvContent = content;
+      
+      // Check if we have the "Search by Niche:" line and skip it
+      if (content.includes("Search by Niche:")) {
+        const lines = content.split(/\r?\n/);
+        // Find the actual header line (typically contains "Customer Need")
+        const headerLineIndex = lines.findIndex(line => line.includes("Customer Need"));
+        
+        if (headerLineIndex > 0) {
+          // Reconstruct CSV with just the header and data rows
+          csvContent = lines.slice(headerLineIndex).join('\n');
+          console.log("Found metadata at top of CSV, skipping to data at line", headerLineIndex);
+        }
+      }
+      
+      // Parse CSV content
+      const parsedCSV = Papa.parse(csvContent, { 
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: header => header.trim()
+      })
+      
+      console.log("CSV parsing results:", {
+        rows: parsedCSV.data.length,
+        fields: parsedCSV.meta.fields,
+        sample: parsedCSV.data.length > 0 ? JSON.stringify(parsedCSV.data[0]).substring(0, 200) + '...' : 'No data'
+      });
+      
+      // Parse the data using our schema mapping
+      const { data: validData, errors: validationErrors } = mapToLevel1Schema(parsedCSV.data)
+      
+      const headerInfo = `
+File type: ${file.type}
+Rows found: ${parsedCSV.data.length}
+Valid entries: ${validData.length}
+${validationErrors.length > 0 ? `Validation errors: ${validationErrors.length}` : ''}
+Headers: ${parsedCSV.meta.fields?.join(', ') || 'None detected'}
+      `
 
-    console.log("File content preview:", content.substring(0, 200))
+      console.log("Parsing results:", {
+        validRows: validData.length,
+        errorsCount: validationErrors.length,
+        headerInfo: headerInfo.split('\n').slice(0, 5).join('\n') + '...' // Log first 5 lines
+      })
 
-    // Parse CSV with proper options
-    const records = parse(content, {
-      columns: true,
-      skip_empty_lines: true,
-      trim: true,
-      relax_column_count: true,
-      skipRecordsWithError: true
-    }) as Level1Record[]
+      // Log first few rows of parsed data for debugging
+      if (validData.length > 0) {
+        console.log("First 2 rows of parsed data:", JSON.stringify(validData.slice(0, 2), null, 2));
+      }
+      if (validationErrors.length > 0) {
+        console.error("First 5 validation errors:", validationErrors.slice(0, 5));
+      }
 
-    console.log("Parsed records:", {
-      count: records.length,
-      headers: Object.keys(records[0] || {}),
-      firstRecord: records[0]
-    })
 
-    if (!records || records.length === 0) {
+      // Check for validation errors
+      if (validationErrors.length > 0 && validData.length === 0) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Validation errors found in the file.",
+            errors: validationErrors,
+            headerInfo: headerInfo,
+          },
+          { status: 400 }
+        );
+      }
+
+      if (validData.length === 0) {
+        console.warn("No data could be extracted from the file.");
+        return NextResponse.json(
+          {
+            success: false,
+            message: "No valid data found in the file. Check file format and content.",
+            headerInfo: headerInfo,
+          },
+          { status: 400 }
+        )
+      }
+
+      console.log(`Successfully parsed ${validData.length} Level 1 records.`);
+      // Return success with the parsed data and header info
+      return NextResponse.json({
+          success: true,
+          message: `Successfully parsed ${validData.length} records.`,
+          data: {
+              data: validData,
+              headerInfo: headerInfo,
+              totalRecords: validData.length,
+          },
+          headerInfo: headerInfo
+      })
+      
+    } catch (parseError) {
+      console.error("Error parsing Level 1 data:", parseError)
       return NextResponse.json(
-        { error: "No data found in file" },
+        {
+          success: false,
+          message: "Failed to parse file",
+          error: parseError instanceof Error ? parseError.message : "Unknown parsing error",
+          headerInfo: `Error: ${parseError instanceof Error ? parseError.message : "Unknown parsing error"}`
+        },
         { status: 400 }
       )
     }
 
-    // Normalize the data - only including Level 1 fields
-    const normalizedData = records.map((record: Level1Record) => {
-      const normalized = {
-        // Basic niche information
-        Customer_Need: record["Customer Need"]?.trim() || "",
-        Top_Search_Terms: [
-          record["Top Search Term 1"],
-          record["Top Search Term 2"],
-          record["Top Search Term 3"]
-        ].filter(Boolean),
-        
-        // Search volume metrics
-        Search_Volume: parseFloat(record["Search Volume (Past 360 days)"]) || 0,
-        Search_Volume_Growth: parseFloat(record["Search Volume Growth (Past 180 days)"]) || 0,
-        Recent_Search_Volume: parseFloat(record["Search Volume (Past 90 days)"]) || 0,
-        Recent_Growth: parseFloat(record["Search Volume Growth (Past 90 days)"]) || 0,
-        
-        // Sales metrics
-        Units_Sold_Lower: parseFloat(record["Units Sold Lower Bound (Past 360 days)"]) || 0,
-        Units_Sold_Upper: parseFloat(record["Units Sold Upper Bound (Past 360 days)"]) || 0,
-        Average_Units_Sold_Lower: parseFloat(record["Range of Average Units Sold Lower Bound (Past 360 days)"]) || 0,
-        Average_Units_Sold_Upper: parseFloat(record["Range of Average Units Sold Upper Bound (Past 360 days)"]) || 0,
-        
-        // Product metrics
-        Top_Products_Count: parseFloat(record["# of Top Clicked Products"]) || 0,
-        Average_Price: parseFloat(record["Average Price (USD)"]) || 0,
-        Min_Price: parseFloat(record["Minimum Price (Past 360 days) (USD)"]) || 0,
-        Max_Price: parseFloat(record["Maximum Price (Past 360 days) (USD)"]) || 0,
-        Return_Rate: parseFloat(record["Return Rate (Past 360 days)"]) || 0
-      }
-
-      console.log("Normalized record:", normalized)
-      return normalized
-    })
-
-    // Calculate validation statistics
-    const validationStats = {
-      totalRecords: normalizedData.length,
-      missingValues: Object.fromEntries(
-        Object.keys(normalizedData[0] || {}).map(key => [
-          key,
-          normalizedData.filter(record => record[key as keyof typeof record] === "N/A").length
-        ])
-      )
-    }
-
-    console.log("Validation statistics:", validationStats)
-
-    console.log("Sending response with normalized data")
-    return NextResponse.json({ 
-      data: normalizedData,
-      headerInfo: {
-        originalHeaders: Object.keys(records[0] || {}),
-        normalizedHeaders: Object.keys(normalizedData[0] || {}),
-        details: `Successfully parsed ${records.length} records`,
-        validationStats
-      }
-    })
   } catch (error) {
-    console.error("Error processing file:", error)
+    console.error("Error processing Level 1 file upload:", error)
+    const errorMessage = error instanceof Error ? error.message : "Unknown error during file processing"
     return NextResponse.json(
-      { 
-        error: "Failed to process file",
-        details: error instanceof Error ? error.message : "Unknown error"
+      {
+        success: false,
+        message: "Failed to process file",
+        error: errorMessage,
+        details: error instanceof Error ? error.stack : undefined
       },
       { status: 500 }
     )

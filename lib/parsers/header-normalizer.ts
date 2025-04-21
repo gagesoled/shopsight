@@ -45,15 +45,21 @@ const HEADER_MAPPINGS: Record<string, Record<string, string>> = {
   'Level2SearchTerms': {
     'Search Term': 'search_term',
     'Search Volume': 'search_volume',
-    'Search Volume Growth': 'search_volume_growth',
+    'Search Volume Growth (90d)': 'search_volume_growth_90d',
+    'Search Volume Growth (180d)': 'search_volume_growth_180d',
+    'Growth (90d)': 'search_volume_growth_90d',
+    'Growth (180d)': 'search_volume_growth_180d',
     'Click Share': 'click_share',
-    'Search Conversion Rate': 'conversion_rate',
+    'Search Conversion Rate': 'search_conversion_rate',
+    'Conversion Rate': 'search_conversion_rate',
     'Top Clicked Product 1 (Title)': 'top_clicked_product_1_title',
-    'Top Clicked Product 1 (Asin)': 'top_clicked_product_1_asin',
-    'Top Clicked Product 2 (Title)': 'top_clicked_product_2_title',
-    'Top Clicked Product 2 (Asin)': 'top_clicked_product_2_asin',
+    'Top Clicked Product 1 (ASIN)': 'top_clicked_product_1_asin',
+    'Top Clicked Product 2 (Title)': 'top_clicked_product_2_title', 
+    'Top Clicked Product 2 (ASIN)': 'top_clicked_product_2_asin',
     'Top Clicked Product 3 (Title)': 'top_clicked_product_3_title',
-    'Top Clicked Product 3 (Asin)': 'top_clicked_product_3_asin',
+    'Top Clicked Product 3 (ASIN)': 'top_clicked_product_3_asin',
+    'Format': 'format_inferred',
+    'Function': 'function_inferred',
   },
 
   // Level 2 Products mappings
@@ -120,31 +126,48 @@ function cleanHeaderText(header: string): string {
  * @returns Normalized header string
  */
 export function normalizeHeader(header: string, dataLevel?: keyof typeof HEADER_MAPPINGS): string {
-  const originalHeader = header.trim();
-  const cleanedHeader = cleanHeaderText(originalHeader);
-
-  // Check for direct mapping if data level is provided
+  // If dataLevel is provided and exists in HEADER_MAPPINGS, use those mappings
   if (dataLevel && HEADER_MAPPINGS[dataLevel]) {
-    const directMapping = HEADER_MAPPINGS[dataLevel][originalHeader];
-    if (directMapping) {
-      return directMapping;
+    const levelMappings = HEADER_MAPPINGS[dataLevel];
+    const cleanedHeader = cleanHeaderText(header);
+    if (levelMappings[cleanedHeader]) {
+      return levelMappings[cleanedHeader];
     }
   }
 
-  // Try to find a match in any of the mappings
-  for (const levelMappings of Object.values(HEADER_MAPPINGS)) {
-    const mapping = levelMappings[originalHeader];
-    if (mapping) {
-      return mapping;
-    }
+  // Remove any content in parentheses
+  let normalized = header.replace(/\([^)]*\)/g, '')
+  
+  // Convert to lowercase and trim
+  normalized = normalized.toLowerCase().trim()
+  
+  // Handle specific cases for Level 2 search terms
+  if (normalized.includes('180') && normalized.includes('growth')) {
+    return 'search_volume_growth_180d'
   }
-
-  // If no direct mapping found, convert to snake_case
-  return cleanedHeader
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')  // Replace non-alphanumeric with underscore
-    .replace(/^_+|_+$/g, '')      // Remove leading/trailing underscores
-    .replace(/_+/g, '_');         // Collapse multiple underscores
+  if (normalized.includes('90') && normalized.includes('growth')) {
+    return 'search_volume_growth_90d'
+  }
+  
+  // Map common variations
+  const headerMappings: Record<string, string> = {
+    'search term': 'search_term',
+    'search volume': 'search_volume',
+    'volume': 'search_volume',
+    'click share': 'click_share',
+    'conversion rate': 'search_conversion_rate',
+    'format': 'format_inferred',
+    'function': 'function_inferred',
+    'values': 'values_inferred',
+    'competition': 'competition',
+    'top clicked product 1 asin': 'top_clicked_product_1_asin',
+    'top clicked product 2 asin': 'top_clicked_product_2_asin',
+    'top clicked product 3 asin': 'top_clicked_product_3_asin'
+  }
+  
+  // Replace spaces with underscores and check mappings
+  normalized = normalized.replace(/\s+/g, '_')
+  return headerMappings[normalized.replace(/_/g, ' ')] || normalized
 }
 
 /**

@@ -20,36 +20,53 @@ import { normalizeHeader, normalizeHeaders, extractMetadata } from './header-nor
  * Parse file into ArrayBuffer
  */
 export async function parseFile(file: File): Promise<ArrayBuffer> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      if (e.target?.result) {
-        resolve(e.target.result as ArrayBuffer)
-      } else {
-        reject(new Error("Failed to read file"))
+  // Check if we're in a browser or server environment
+  if (typeof FileReader !== 'undefined') {
+    // Browser environment
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        if (e.target?.result) {
+          resolve(e.target.result as ArrayBuffer)
+        } else {
+          reject(new Error("Failed to read file"))
+        }
       }
-    }
-    reader.onerror = () => reject(new Error("Failed to read file"))
-    reader.readAsArrayBuffer(file)
-  })
+      reader.onerror = () => reject(new Error("Failed to read file"))
+      reader.readAsArrayBuffer(file)
+    })
+  } else {
+    // Server environment
+    const buffer = await file.arrayBuffer()
+    return buffer
+  }
 }
 
 /**
  * Parse CSV file as text
  */
 export async function parseCSVAsText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      if (e.target?.result) {
-        resolve(e.target.result as string)
-      } else {
-        reject(new Error("Failed to read file"))
+  // Check if we're in a browser or server environment
+  if (typeof FileReader !== 'undefined') {
+    // Browser environment
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        if (e.target?.result) {
+          resolve(e.target.result as string)
+        } else {
+          reject(new Error("Failed to read file"))
+        }
       }
-    }
-    reader.onerror = () => reject(new Error("Failed to read file"))
-    reader.readAsText(file)
-  })
+      reader.onerror = () => reject(new Error("Failed to read file"))
+      reader.readAsText(file)
+    })
+  } else {
+    // Server environment
+    const buffer = await file.arrayBuffer()
+    const text = new TextDecoder().decode(buffer)
+    return text
+  }
 }
 
 /**

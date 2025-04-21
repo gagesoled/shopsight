@@ -69,6 +69,25 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const trendClusters = clusters.map((c) => {
+      // Use the AI-generated title directly (now declared on AICluster)
+      const rawTitle = c.title
+      const id = rawTitle
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "-")
+      return {
+        id,
+        name: rawTitle,
+        description: c.description ?? "",
+        opportunityScore: c.metrics?.opportunityScore ?? 0,
+        searchVolume: c.metrics?.totalVolume,
+        clickShare: c.terms.reduce((sum, t) => sum + t.clickShare, 0) / c.terms.length,
+        keywords: c.terms.map((t) => t.term),
+        tags: (c.tags || []).map((tag) => ({ category: tag.category, value: tag.value })),
+      }
+    })
+
     return NextResponse.json({
       success: true,
       message: "Level 2 file processed successfully",
@@ -78,11 +97,11 @@ export async function POST(req: NextRequest) {
         searchTerms: searchTerms.data,
         nicheInsights: nicheInsights.data,
         products: products.data,
-        clusters,
+        clusters: trendClusters,
         totalSearchTerms: searchTerms.data.length,
         totalNicheInsights: nicheInsights.data.length,
         totalProducts: products.data.length,
-        totalClusters: clusters.length,
+        totalClusters: trendClusters.length,
       },
     })
   } catch (error) {

@@ -10,22 +10,39 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 
 interface UploadProps {
-  endpoint: string
-  acceptedFileTypes: string[]
-  maxSize: number // in MB
+  endpoint?: string
+  acceptedFileTypes?: string[]
+  maxSize?: number // in MB
+  onUpload?: (data: any) => void
   onSuccess?: (data: any) => void
+  accept?: string
   fileUrl?: string // Optional URL for direct processing
+  loading?: boolean
+  label?: string
+  helpText?: string
 }
 
 interface HeaderInfo {
   originalHeaders?: string[]
   normalizedHeaders?: string[]
   details?: string
+  rawInfo?: string
 }
 
-export function Upload({ endpoint, acceptedFileTypes, maxSize, onSuccess, fileUrl }: UploadProps) {
+export function Upload({ 
+  endpoint, 
+  acceptedFileTypes = [".csv"], 
+  maxSize = 10, 
+  onSuccess, 
+  onUpload,
+  accept,
+  fileUrl,
+  loading,
+  label = "Upload File",
+  helpText = "Drag and drop your file here or click to browse"
+}: UploadProps) {
   const [file, setFile] = useState<File | null>(null)
-  const [uploading, setUploading] = useState(false)
+  const [uploading, setUploading] = useState(loading || false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<string[]>([])
@@ -33,6 +50,7 @@ export function Upload({ endpoint, acceptedFileTypes, maxSize, onSuccess, fileUr
   const [headerInfo, setHeaderInfo] = useState<HeaderInfo | null>(null)
   const [warnings, setWarnings] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploadStarted, setUploadStarted] = useState(false)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
@@ -44,11 +62,13 @@ export function Upload({ endpoint, acceptedFileTypes, maxSize, onSuccess, fileUr
 
     if (!selectedFile) return
 
-    // Check file type
-    const fileExtension = `.${selectedFile.name.split(".").pop()?.toLowerCase()}`
-    if (!acceptedFileTypes.includes(fileExtension) && !acceptedFileTypes.includes("*")) {
-      setError(`Invalid file type. Accepted types: ${acceptedFileTypes.join(", ")}`)
-      return
+    // Check file type if acceptedFileTypes is provided
+    if (acceptedFileTypes && acceptedFileTypes.length > 0) {
+      const fileExtension = `.${selectedFile.name.split(".").pop()?.toLowerCase()}`
+      if (!acceptedFileTypes.includes(fileExtension) && !acceptedFileTypes.includes("*")) {
+        setError(`Invalid file type. Accepted types: ${acceptedFileTypes.join(", ")}`)
+        return
+      }
     }
 
     // Check file size
@@ -58,6 +78,12 @@ export function Upload({ endpoint, acceptedFileTypes, maxSize, onSuccess, fileUr
     }
 
     setFile(selectedFile)
+    
+    // If onUpload is provided, call it directly with the file
+    if (onUpload) {
+      onUpload(selectedFile)
+      setUploadStarted(true)
+    }
   }
 
   const processFile = async (fileToProcess: File | null, urlToProcess: string | null) => {
@@ -90,6 +116,11 @@ export function Upload({ endpoint, acceptedFileTypes, maxSize, onSuccess, fileUr
         throw new Error("No file or URL provided")
       }
 
+      // Only make the fetch request if endpoint is provided
+      if (!endpoint) {
+        throw new Error("No endpoint provided for upload")
+      }
+
       console.log("Sending request to:", endpoint)
       const response = await fetch(endpoint, {
         method: "POST",
@@ -102,7 +133,8 @@ export function Upload({ endpoint, acceptedFileTypes, maxSize, onSuccess, fileUr
       clearInterval(interval)
       setProgress(100)
 
-      if (!response.ok) {
+      // Check for success field first - new API format
+      if (result.success === false || !response.ok) {
         if (result.errors && Array.isArray(result.errors)) {
           setValidationErrors(result.errors)
         } else if (result.error) {
@@ -113,16 +145,24 @@ export function Upload({ endpoint, acceptedFileTypes, maxSize, onSuccess, fileUr
 
         // Still show header info even if there are errors
         if (result.headerInfo) {
-          setHeaderInfo(result.headerInfo)
+          if (typeof result.headerInfo === 'string') {
+            setHeaderInfo({ rawInfo: result.headerInfo })
+          } else {
+            setHeaderInfo(result.headerInfo)
+          }
         }
 
         setUploading(false)
         return
       }
 
-      // Display header detection info if available
+      // Display header detection info if available 
       if (result.headerInfo) {
-        setHeaderInfo(result.headerInfo)
+        if (typeof result.headerInfo === 'string') {
+          setHeaderInfo({ rawInfo: result.headerInfo })
+        } else {
+          setHeaderInfo(result.headerInfo)
+        }
       }
 
       // Display warnings if available
@@ -133,8 +173,14 @@ export function Upload({ endpoint, acceptedFileTypes, maxSize, onSuccess, fileUr
       setSuccess(true)
 
       // Call onSuccess callback if provided
-      if (onSuccess && result.data) {
-        onSuccess(result.data)
+      // With the new API format, the data is in result.data
+      if (onSuccess) {
+        if (result.data) {
+          onSuccess(result.data)
+        } else {
+          // If data is at the top level for backward compatibility
+          onSuccess(result)
+        }
       }
 
       // Reset upload state after success
@@ -152,9 +198,19 @@ export function Upload({ endpoint, acceptedFileTypes, maxSize, onSuccess, fileUr
 
   const handleUpload = () => {
     if (file) {
-      processFile(file, null)
-    } else if (fileUrl) {
+      if (onUpload) {
+        onUpload(file)
+        setUploadStarted(true)
+      } else if (endpoint) {
+        processFile(file, null)
+      } else {
+        // No endpoint and no onUpload handler, show an error
+        setError("No upload handler configured")
+      }
+    } else if (fileUrl && endpoint) {
       processFile(null, fileUrl)
+    } else if (fileUrl) {
+      setError("No endpoint provided for URL processing")
     }
   }
 
@@ -177,10 +233,12 @@ export function Upload({ endpoint, acceptedFileTypes, maxSize, onSuccess, fileUr
     const droppedFile = e.dataTransfer.files?.[0]
     if (droppedFile) {
       // Manually check file type and size as we did in handleFileChange
-      const fileExtension = `.${droppedFile.name.split(".").pop()?.toLowerCase()}`
-      if (!acceptedFileTypes.includes(fileExtension) && !acceptedFileTypes.includes("*")) {
-        setError(`Invalid file type. Accepted types: ${acceptedFileTypes.join(", ")}`)
-        return
+      if (acceptedFileTypes && acceptedFileTypes.length > 0) {
+        const fileExtension = `.${droppedFile.name.split(".").pop()?.toLowerCase()}`
+        if (!acceptedFileTypes.includes(fileExtension) && !acceptedFileTypes.includes("*")) {
+          setError(`Invalid file type. Accepted types: ${acceptedFileTypes.join(", ")}`)
+          return
+        }
       }
 
       if (droppedFile.size > maxSize * 1024 * 1024) {
@@ -194,6 +252,12 @@ export function Upload({ endpoint, acceptedFileTypes, maxSize, onSuccess, fileUr
       setSuccess(false)
       setHeaderInfo(null)
       setWarnings(null)
+      
+      // If onUpload is provided, call it directly with the file
+      if (onUpload) {
+        onUpload(droppedFile)
+        setUploadStarted(true)
+      }
     }
   }
 
@@ -230,7 +294,7 @@ export function Upload({ endpoint, acceptedFileTypes, maxSize, onSuccess, fileUr
             type="file"
             ref={fileInputRef}
             onChange={handleFileChange}
-            accept={acceptedFileTypes.join(",")}
+            accept={accept || (acceptedFileTypes && acceptedFileTypes.length > 0 ? acceptedFileTypes.join(",") : undefined)}
             className="hidden"
             disabled={uploading}
           />
@@ -238,9 +302,12 @@ export function Upload({ endpoint, acceptedFileTypes, maxSize, onSuccess, fileUr
           {!file && !error && !success && validationErrors.length === 0 && (
             <>
               <UploadIcon className="h-10 w-10 text-gray-400 mb-2" />
-              <p className="text-sm text-gray-600 mb-1">Drag and drop your file here, or click to browse</p>
+              <p className="text-sm text-gray-600 mb-1">{helpText}</p>
               <p className="text-xs text-gray-500">
-                Accepted file types: {acceptedFileTypes.join(", ")} (Max size: {maxSize}MB)
+                {acceptedFileTypes && acceptedFileTypes.length > 0 
+                  ? `Accepted file types: ${acceptedFileTypes.join(", ")} (Max size: ${maxSize}MB)`
+                  : `Max file size: ${maxSize}MB`
+                }
               </p>
             </>
           )}
@@ -276,10 +343,10 @@ export function Upload({ endpoint, acceptedFileTypes, maxSize, onSuccess, fileUr
         </div>
       )}
 
-      {file && !uploading && !success && (
+      {file && !uploading && !success && !uploadStarted && (
         <div className="mt-4">
           <Button onClick={handleUpload} className="w-full">
-            Upload File
+            {label}
           </Button>
         </div>
       )}
@@ -313,43 +380,45 @@ export function Upload({ endpoint, acceptedFileTypes, maxSize, onSuccess, fileUr
                 )}
 
                 {headerInfo && (
-                  <Alert className="mb-4">
-                    <Info className="h-4 w-4" />
-                    <AlertTitle>File Information</AlertTitle>
-                    <AlertDescription>
-                      <div className="space-y-2">
-                        {headerInfo.originalHeaders && (
-                          <div>
-                            <h4 className="font-semibold">Original Headers</h4>
-                            <pre className="whitespace-pre-wrap text-xs bg-gray-50 p-2 rounded border overflow-auto max-h-40">
-                              {headerInfo.originalHeaders.join("\n")}
-                            </pre>
-                          </div>
+                  <Accordion type="single" collapsible className="mt-4">
+                    <AccordionItem value="header-info">
+                      <AccordionTrigger>File Processing Details</AccordionTrigger>
+                      <AccordionContent>
+                        {headerInfo.rawInfo ? (
+                          <pre className="text-xs bg-gray-50 p-2 rounded overflow-auto max-h-40 whitespace-pre-wrap">
+                            {headerInfo.rawInfo}
+                          </pre>
+                        ) : (
+                          <>
+                            {headerInfo.details && (
+                              <p className="text-sm mb-2">{headerInfo.details}</p>
+                            )}
+                            {headerInfo.originalHeaders && (
+                              <div className="mb-2">
+                                <p className="text-xs font-medium">Original Headers:</p>
+                                <p className="text-xs bg-gray-50 p-1 rounded">
+                                  {headerInfo.originalHeaders.join(", ")}
+                                </p>
+                              </div>
+                            )}
+                            {headerInfo.normalizedHeaders && (
+                              <div>
+                                <p className="text-xs font-medium">Mapped Fields:</p>
+                                <p className="text-xs bg-gray-50 p-1 rounded">
+                                  {headerInfo.normalizedHeaders.join(", ")}
+                                </p>
+                              </div>
+                            )}
+                          </>
                         )}
-                        {headerInfo.normalizedHeaders && (
-                          <div>
-                            <h4 className="font-semibold">Normalized Headers</h4>
-                            <pre className="whitespace-pre-wrap text-xs bg-gray-50 p-2 rounded border overflow-auto max-h-40">
-                              {headerInfo.normalizedHeaders.join("\n")}
-                            </pre>
-                          </div>
-                        )}
-                        {headerInfo.details && (
-                          <div>
-                            <h4 className="font-semibold">Processing Details</h4>
-                            <pre className="whitespace-pre-wrap text-xs bg-gray-50 p-2 rounded border overflow-auto max-h-40">
-                              {headerInfo.details}
-                            </pre>
-                          </div>
-                        )}
-                      </div>
-                    </AlertDescription>
-                  </Alert>
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
                 )}
 
                 {warnings && (
-                  <Alert variant="warning" className="mb-4">
-                    <AlertCircle className="h-4 w-4" />
+                  <Alert variant="default" className="mb-4">
+                    <Info className="h-4 w-4" />
                     <AlertTitle>Warnings</AlertTitle>
                     <AlertDescription>{warnings}</AlertDescription>
                   </Alert>

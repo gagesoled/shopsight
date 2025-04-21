@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { analyzeLevel1Data } from "@/lib/analysis/ai-clustering"
+import { analyzeLevel1DataForClustering } from "@/lib/analysis/ai-clustering"
 import { OpenAI } from "openai"
 
 export async function POST(request: Request) {
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     })
 
     // Run analysis
-    const results = await analyzeLevel1Data(data, openai)
+    const results = await analyzeLevel1DataForClustering(data, openai)
 
     return NextResponse.json(results)
   } catch (error) {

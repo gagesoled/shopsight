@@ -29,8 +29,8 @@ export default function RootLayout({
                 <nav>
                   <ul className="flex space-x-6">
                     <li>
-                      <a href="/" className="text-sm font-medium hover:text-primary">
-                        Home
+                      <a href="/category-search" className="text-sm font-medium text-primary">
+                        Category Search
                       </a>
                     </li>
                     <li>
@@ -54,6 +54,3 @@ export default function RootLayout({
     </html>
   )
 }
-
-
-import './globals.css'

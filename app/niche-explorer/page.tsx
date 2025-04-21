@@ -94,7 +94,7 @@ export default function NicheExplorer() {
   const handleSelectProduct = (asin: string) => {
     setSelectedProduct(asin)
     // Navigate to product keyword view with the selected product
-    window.location.href = `/product-keyword-view?asin=${asin}`
+    window.location.href = `/product-keywords?asin=${asin}`
   }
 
   const handleGenerateSummary = async () => {
@@ -395,6 +395,9 @@ export default function NicheExplorer() {
       <div className="flex justify-center space-x-4">
         <Button variant="outline" onClick={() => window.history.back()}>
           Back to Home
+        </Button>
+        <Button variant="outline" onClick={() => window.location.href = "/product-keywords"}>
+          Go to Product Keywords
         </Button>
       </div>
     </main>

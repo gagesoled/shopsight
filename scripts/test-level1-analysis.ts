@@ -1,5 +1,5 @@
 import { OpenAI } from "openai"
-import { analyzeLevel1Data, Level1Analysis, Level1Data } from "@/lib/analysis/ai-clustering"
+import { analyzeLevel1DataForClustering, Level1Analysis, Level1Data } from "@/lib/analysis/ai-clustering"
 import fs from "fs/promises"
 import path from "path"
 
@@ -15,7 +15,7 @@ async function testLevel1Analysis() {
       {
         Customer_Need: "Natural Sleep Solutions",
         Search_Volume: 50000,
-        Search_Volume_Growth: 25,
+        Search_Volume_Growth: 0.25,
         Click_Share: 0.15,
         Conversion_Rate: 0.08,
         Brand_Concentration: 0.35,
@@ -25,7 +25,7 @@ async function testLevel1Analysis() {
       {
         Customer_Need: "Sleep Maintenance",
         Search_Volume: 35000,
-        Search_Volume_Growth: 15,
+        Search_Volume_Growth: 0.15,
         Click_Share: 0.12,
         Conversion_Rate: 0.06,
         Brand_Concentration: 0.45,
@@ -35,7 +35,7 @@ async function testLevel1Analysis() {
       {
         Customer_Need: "Sleep Onset",
         Search_Volume: 45000,
-        Search_Volume_Growth: 20,
+        Search_Volume_Growth: 0.20,
         Click_Share: 0.18,
         Conversion_Rate: 0.09,
         Brand_Concentration: 0.30,
@@ -45,7 +45,7 @@ async function testLevel1Analysis() {
     ]
 
     console.log("Running Level 1 analysis...")
-    const results = await analyzeLevel1Data(sampleData, openai)
+    const results = await analyzeLevel1DataForClustering(sampleData, openai)
 
     // Display results
     console.log("\nLevel 1 Analysis Results:")
