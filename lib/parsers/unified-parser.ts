@@ -11,9 +11,9 @@ import {
   type Level2NicheInsightData,
   type Level2ProductData,
   type Level3Data,
-} from "@/lib/schemas"
+} from "../validation"
 import { ParseResult } from '../types'
-import Papa from 'papaparse'
+import * as Papa from 'papaparse'
 import { normalizeHeader, normalizeHeaders, extractMetadata } from './header-normalizer'
 
 /**
@@ -103,7 +103,7 @@ export function parseNumberValue(value: string | number | null | undefined): num
 
   // If already a number, return it
   if (typeof value === "number") {
-    return value
+    return isNaN(value) ? undefined : value
   }
 
   // Convert to string and trim
@@ -113,19 +113,29 @@ export function parseNumberValue(value: string | number | null | undefined): num
   if (strValue === "") {
     return undefined
   }
+  
+  // Handle "N/A", "-", "null", etc.
+  if (["n/a", "na", "-", "null", "undefined"].includes(strValue.toLowerCase())) {
+    return undefined
+  }
 
   // Handle percentage values (e.g., "25%")
   if (strValue.endsWith("%")) {
     const percentValue = strValue.replace("%", "").trim()
+    try {
     const result = Number.parseFloat(percentValue) / 100
-    console.log(`Parsed percentage: ${strValue} -> ${result}`)
-    return result
+      return isNaN(result) ? undefined : result
+    } catch (e) {
+      console.log(`Failed to parse percentage: ${strValue}`)
+      return undefined
+    }
   }
 
-  // Handle numbers with commas (e.g., "1,000")
-  const cleanedValue = strValue.replace(/,/g, "")
+  // Handle numbers with commas (e.g., "1,000") and potentially other separators
+  const cleanedValue = strValue.replace(/,/g, "").replace(/\s/g, "")
 
   // Parse as float
+  try {
   const parsedValue = Number.parseFloat(cleanedValue)
 
   // Return undefined if NaN
@@ -134,8 +144,11 @@ export function parseNumberValue(value: string | number | null | undefined): num
     return undefined
   }
 
-  console.log(`Parsed number: ${originalValue} -> ${parsedValue}`)
   return parsedValue
+  } catch (e) {
+    console.log(`Exception parsing number: ${originalValue}`)
+    return undefined
+  }
 }
 
 /**
@@ -241,16 +254,16 @@ function findHeaderRow(lines: string[]): { headerRowIndex: number; headers: stri
 /**
  * Parse CSV data with improved header detection
  */
-export function parseCSV(csvText: string): { headers: string[]; rows: any[]; headerRowIndex: number } {
+export function parseCSV(csvText: string): { headers: string[]; rows: any[]; headerRowIndex: number; metadata: Record<string, string> } {
   // Split by lines
   const lines = csvText.trim().split(/\r?\n/)
 
   if (lines.length === 0) {
-    return { headers: [], rows: [], headerRowIndex: -1 }
+    return { headers: [], rows: [], headerRowIndex: -1, metadata: {} }
   }
 
   // Extract metadata and find where data starts
-  const { metadata, dataStartIndex } = extractMetadata(csvText);
+  const { metadata, dataStartIndex } = extractMetadata(csvText)
   
   // Find the header row
   const { headerRowIndex, headers: rawHeaders } = findHeaderRow(lines.slice(dataStartIndex))
@@ -305,7 +318,7 @@ export function parseCSV(csvText: string): { headers: string[]; rows: any[]; hea
     console.log("First row of parsed CSV:", rows[0])
   }
 
-  return { headers, rows, headerRowIndex: actualHeaderRowIndex }
+  return { headers, rows, headerRowIndex: actualHeaderRowIndex, metadata }
 }
 
 /**
@@ -533,24 +546,67 @@ function processExcelSheet(worksheet: XLSX.WorkSheet): { headers: string[]; rows
  * Determine if headers indicate a search terms sheet
  */
 function isSearchTermsSheet(headers: string[]): boolean {
-  const searchTermsIndicators = ["Search_Term", "Volume", "Growth_180", "Growth_90", "Top_Clicked_Product"]
-  return searchTermsIndicators.some((indicator) => headers.some((header) => header.includes(indicator)))
+  const searchTermKeywords = ["search_term", "search term", "searchterm", "keyword", "term"];
+  const volumeKeywords = ["volume", "search volume", "search_volume"];
+  
+  // Convert headers to lowercase for case-insensitive matching
+  const lowercaseHeaders = headers.map(h => h.toLowerCase());
+  
+  // Check if we have at least one search term indicator and one volume indicator
+  const hasSearchTermIndicator = searchTermKeywords.some(keyword => 
+    lowercaseHeaders.some(header => header.includes(keyword))
+  );
+  
+  const hasVolumeIndicator = volumeKeywords.some(keyword => 
+    lowercaseHeaders.some(header => header.includes(keyword))
+  );
+  
+  return hasSearchTermIndicator && hasVolumeIndicator;
 }
 
 /**
  * Determine if headers indicate a niche insights sheet
  */
 function isNicheInsightsSheet(headers: string[]): boolean {
-  const insightsIndicators = ["Insight_Category", "Insight", "Relevance_Score", "Supporting_Keywords"]
-  return insightsIndicators.some((indicator) => headers.some((header) => header.includes(indicator)))
+  const insightsIndicators = ["insight_category", "insight category", "insight", "relevance_score", "relevance score", "supporting_keywords", "supporting keywords"]
+  
+  // Convert headers to lowercase for case-insensitive matching
+  const lowercaseHeaders = headers.map(h => h.toLowerCase());
+  
+  return insightsIndicators.some(indicator => 
+    lowercaseHeaders.some(header => header.includes(indicator))
+  );
 }
 
 /**
  * Determine if headers indicate a products sheet
  */
 function isProductsSheet(headers: string[]): boolean {
-  const productsIndicators = ["Product_Name", "ASIN", "Brand", "Price", "Rating", "Review_Count", "BSR"]
-  return productsIndicators.some((indicator) => headers.some((header) => header.includes(indicator)))
+  // Key indicators that would indicate this is a products sheet
+  const productNameKeywords = ["product_name", "product name", "productname", "title", "item name", "item_name"];
+  const productIdentifierKeywords = ["asin", "sku", "product_id", "product id", "productid"];
+  const productMetricsKeywords = ["brand", "price", "rating", "review", "bsr", "best seller rank", "sales rank"];
+  
+  // Convert headers to lowercase for case-insensitive matching
+  const lowercaseHeaders = headers.map(h => h.toLowerCase());
+  
+  // Check for product name indicators
+  const hasProductNameIndicator = productNameKeywords.some(keyword => 
+    lowercaseHeaders.some(header => header.includes(keyword))
+  );
+  
+  // Check for product identifier indicators
+  const hasProductIdentifierIndicator = productIdentifierKeywords.some(keyword => 
+    lowercaseHeaders.some(header => header.includes(keyword))
+  );
+  
+  // Check for product metrics indicators
+  const hasProductMetricsIndicator = productMetricsKeywords.some(keyword => 
+    lowercaseHeaders.some(header => header.includes(keyword))
+  );
+  
+  // We need at least a product name indicator plus either an identifier or metrics indicator
+  return hasProductNameIndicator && (hasProductIdentifierIndicator || hasProductMetricsIndicator);
 }
 
 /**
@@ -586,52 +642,44 @@ function processCSV(rows: any[]): {
   const headers = Object.keys(rows[0])
   result.headerInfo = `CSV headers: ${headers.join(", ")}\n`
 
-  // Determine the type of data based on headers
-  if (isSearchTermsSheet(headers)) {
-    const processed = processSearchTerms(rows)
-    result.searchTerms = processed
-    result.headerInfo += `Processed as Search Terms: ${processed.data.length} valid rows, ${processed.errors.length} errors\n`
-    return result
-  }
-
-  if (isProductsSheet(headers)) {
-    const processed = processProducts(rows)
-    result.products = processed
-    result.headerInfo += `Processed as Products: ${processed.data.length} valid rows, ${processed.errors.length} errors\n`
-    return result
-  }
-
-  if (isNicheInsightsSheet(headers)) {
-    const processed = processNicheInsights(rows)
-    result.nicheInsights = processed
-    result.headerInfo += `Processed as Niche Insights: ${processed.data.length} valid rows, ${processed.errors.length} errors\n`
-    return result
-  }
-
-  // If we can't determine the type, try all processors
-  result.headerInfo += "Sheet type unclear, trying all processors\n"
-
+  // Process with all processors for full coverage
   const searchTermsResult = processSearchTerms(rows)
   const nicheInsightsResult = processNicheInsights(rows)
   const productsResult = processProducts(rows)
 
-  // Use the one with the most valid data
-  if (
-    searchTermsResult.data.length > 0 &&
-    searchTermsResult.data.length >= nicheInsightsResult.data.length &&
-    searchTermsResult.data.length >= productsResult.data.length
-  ) {
-    result.searchTerms = searchTermsResult
-    result.headerInfo += `Processed as Search Terms: ${searchTermsResult.data.length} valid rows\n`
-  } else if (nicheInsightsResult.data.length > 0 && nicheInsightsResult.data.length >= productsResult.data.length) {
-    result.nicheInsights = nicheInsightsResult
-    result.headerInfo += `Processed as Niche Insights: ${nicheInsightsResult.data.length} valid rows\n`
-  } else if (productsResult.data.length > 0) {
-    result.products = productsResult
-    result.headerInfo += `Processed as Products: ${productsResult.data.length} valid rows\n`
+  // Add result details to headerInfo
+  result.headerInfo += `Found ${searchTermsResult.data.length} search terms (${searchTermsResult.errors.length} errors)\n`
+  result.headerInfo += `Found ${nicheInsightsResult.data.length} niche insights (${nicheInsightsResult.errors.length} errors)\n`
+  result.headerInfo += `Found ${productsResult.data.length} products (${productsResult.errors.length} errors)\n`
+
+  // Determine the primary file type based on data counts, but keep all valid data
+  if (isSearchTermsSheet(headers) && searchTermsResult.data.length > 0) {
+    result.headerInfo += `Identified as Search Terms file (${searchTermsResult.data.length} rows)\n`
+  } else if (isProductsSheet(headers) && productsResult.data.length > 0) {
+    result.headerInfo += `Identified as Products file (${productsResult.data.length} rows)\n`
+  } else if (isNicheInsightsSheet(headers) && nicheInsightsResult.data.length > 0) {
+    result.headerInfo += `Identified as Niche Insights file (${nicheInsightsResult.data.length} rows)\n`
   } else {
-    result.headerInfo += `Could not process CSV as any known type\n`
+    // If type detection based on headers fails, determine by data count
+    if (searchTermsResult.data.length > 0 && 
+    searchTermsResult.data.length >= nicheInsightsResult.data.length &&
+        searchTermsResult.data.length >= productsResult.data.length) {
+      result.headerInfo += `Determined as Search Terms file by data count (${searchTermsResult.data.length} rows)\n`
+    } else if (productsResult.data.length > 0 &&
+               productsResult.data.length >= searchTermsResult.data.length &&
+               productsResult.data.length >= nicheInsightsResult.data.length) {
+      result.headerInfo += `Determined as Products file by data count (${productsResult.data.length} rows)\n`
+    } else if (nicheInsightsResult.data.length > 0) {
+      result.headerInfo += `Determined as Niche Insights file by data count (${nicheInsightsResult.data.length} rows)\n`
+    } else {
+      result.headerInfo += `Could not determine file type (no valid data found)\n`
+    }
   }
+
+  // Always include all valid data in the result
+    result.searchTerms = searchTermsResult
+    result.nicheInsights = nicheInsightsResult
+    result.products = productsResult
 
   return result
 }
@@ -645,23 +693,140 @@ function processSearchTerms(data: any[]): ParseResult<Level2SearchTermData> {
 
   for (const item of data) {
     try {
-      const processedItem: Level2SearchTermData = {
-        Search_Term: String(item.Search_Term || item.search_term || item.term || ""),
-        Volume: Number(item.Volume || item.volume || 0),
-        Growth_90: item.Growth_90 || item.growth_90 ? Number(item.Growth_90 || item.growth_90) : undefined,
-        Growth_180: item.Growth_180 || item.growth_180 ? Number(item.Growth_180 || item.growth_180) : undefined,
-        Click_Share: item.Click_Share || item.click_share ? Number(item.Click_Share || item.click_share) : undefined,
-        Conversion_Rate: item.Conversion_Rate || item.conversion_rate ? Number(item.Conversion_Rate || item.conversion_rate) : undefined,
-        Format_Inferred: item.Format_Inferred || item.format_inferred || undefined,
-        Function_Inferred: item.Function_Inferred || item.function_inferred || undefined,
-        Top_Clicked_Product_1_ASIN: item.Top_Clicked_Product_1_ASIN || item.top_clicked_product_1_asin || undefined,
-        Top_Clicked_Product_2_ASIN: item.Top_Clicked_Product_2_ASIN || item.top_clicked_product_2_asin || undefined,
-        Top_Clicked_Product_3_ASIN: item.Top_Clicked_Product_3_ASIN || item.top_clicked_product_3_asin || undefined
+      // Debug raw values
+      console.log("Processing search term row:", item)
+
+      // Find search term using possible field names
+      const searchTermField = findField(item, [
+        "Search_Term", "search_term", "Search Term", "SearchTerm", 
+        "Keyword", "keyword", "Term", "term", "Query", "query"
+      ]);
+
+      // Extract search volume more carefully
+      const volumeRaw = findField(item, [
+        "Search_Volume", "search_volume", "Search Volume", "Volume", 
+        "volume", "Monthly Volume", "monthly_volume", "Searches", "searches"
+      ]);
+      
+      let volume = 0;
+      if (volumeRaw !== undefined) {
+        const parsedVolume = parseNumberValue(volumeRaw);
+        volume = parsedVolume !== undefined ? parsedVolume : 0;
       }
+
+      // Handle cases where volume might be a string with commas or other formatting
+      if (typeof volume === 'string') {
+        const numValue = String(volume).replace(/,/g, '');
+        volume = Number(numValue);
+        if (isNaN(volume)) volume = 0;
+      }
+
+      // Find growth data - both 90 day and 180 day
+      const growth90Raw = findField(item, [
+        "Growth_90", "growth_90", "Growth (90d)", "Search Volume Growth (90d)", 
+        "search_volume_growth_90d", "growth_90d", "90 Day Growth", "90d_growth",
+        "Three Month Growth", "three_month_growth"
+      ]);
+      const growth90 = parseNumberValue(growth90Raw);
+
+      const growth180Raw = findField(item, [
+        "Growth_180", "growth_180", "Growth (180d)", "Search Volume Growth (180d)", 
+        "search_volume_growth_180d", "growth_180d", "180 Day Growth", "180d_growth",
+        "Six Month Growth", "six_month_growth"
+      ]);
+      const growth180 = parseNumberValue(growth180Raw);
+
+      // Find click share
+      const clickShareRaw = findField(item, [
+        "Click_Share", "click_share", "Click Share", "ClickShare", 
+        "CTR", "ctr", "Click Through Rate", "click_through_rate"
+      ]);
+      const clickShare = parseNumberValue(clickShareRaw);
+
+      // Find conversion rate
+      const conversionRateRaw = findField(item, [
+        "Conversion_Rate", "conversion_rate", "Conversion Rate", "ConversionRate", 
+        "Conversion", "conversion", "CVR", "cvr"
+      ]);
+      const conversionRate = parseNumberValue(conversionRateRaw);
+
+      // Find format
+      const formatField = findField(item, [
+        "Format", "format", "Format_Inferred", "format_inferred", "Format Inferred",
+        "Product Format", "product_format", "Item Format", "item_format"
+      ]);
+
+      // Find function
+      const functionField = findField(item, [
+        "Function", "function", "Function_Inferred", "function_inferred", "Function Inferred",
+        "Product Function", "product_function", "Item Function", "item_function"
+      ]);
+
+      // Find values
+      const valuesField = findField(item, [
+        "Values", "values", "Values_Inferred", "values_inferred", "Values Inferred",
+        "Product Values", "product_values", "Item Values", "item_values"
+      ]);
+
+      // Find competition
+      const competitionRaw = findField(item, [
+        "Competition", "competition", "Difficulty", "difficulty", 
+        "Competitive Score", "competitive_score"
+      ]);
+      const competition = parseNumberValue(competitionRaw);
+
+      // Find top clicked products
+      const topProduct1 = findField(item, [
+        "Top_Clicked_Product_1_ASIN", "top_clicked_product_1_asin", "Top Clicked Product 1",
+        "Top Product 1", "top_product_1", "Top ASIN 1", "top_asin_1"
+      ]);
+
+      const topProduct2 = findField(item, [
+        "Top_Clicked_Product_2_ASIN", "top_clicked_product_2_asin", "Top Clicked Product 2",
+        "Top Product 2", "top_product_2", "Top ASIN 2", "top_asin_2"
+      ]);
+
+      const topProduct3 = findField(item, [
+        "Top_Clicked_Product_3_ASIN", "top_clicked_product_3_asin", "Top Clicked Product 3",
+        "Top Product 3", "top_product_3", "Top ASIN 3", "top_asin_3"
+      ]);
+
+      const processedItem: Level2SearchTermData = {
+        Search_Term: searchTermField ? String(searchTermField) : "",
+        Volume: volume,
+        Growth_90: growth90,
+        Growth_180: growth180,
+        Click_Share: clickShare || 0,
+        Conversion_Rate: conversionRate,
+        Format_Inferred: formatField,
+        Function_Inferred: functionField,
+        Values_Inferred: valuesField,
+        Competition: competition,
+        Top_Clicked_Product_1_ASIN: topProduct1,
+        Top_Clicked_Product_2_ASIN: topProduct2,
+        Top_Clicked_Product_3_ASIN: topProduct3
+      }
+
+      // Skip items without a search term
+      if (!processedItem.Search_Term) {
+        console.log("Skipping search term row: Missing search term");
+        continue;
+      }
+
+      // Debug processed values
+      console.log("Processed search term:", processedItem)
+
+      // Validate the processed item
+      const validationResult = Level2SearchTermDataSchema.safeParse(processedItem)
+      if (!validationResult.success) {
+        throw new Error(`Validation failed: ${validationResult.error.message}`)
+      }
+
       processed.push(processedItem)
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       errors.push(`Error processing search term: ${errorMessage}`)
+      console.error("Error processing row:", error)
     }
   }
 
@@ -669,29 +834,73 @@ function processSearchTerms(data: any[]): ParseResult<Level2SearchTermData> {
 }
 
 /**
- * Process niche insights data with more lenient validation
+ * Process data rows as niche insights data
  */
-function processNicheInsights(data: any[]): ParseResult<Level2NicheInsightData> {
-  const processed: Level2NicheInsightData[] = []
-  const errors: string[] = []
-
-  for (const item of data) {
-    try {
-      const processedItem: Level2NicheInsightData = {
-        Insight_Category: String(item.Insight_Category || item.insight_category || item.category || ""),
-        Insight: String(item.Insight || item.insight || ""),
-        Relevance_Score: item.Relevance_Score || item.relevance_score ? Number(item.Relevance_Score || item.relevance_score) : undefined,
-        Supporting_Keywords: item.Supporting_Keywords || item.supporting_keywords || undefined,
-        Notes: item.Notes || item.notes || undefined
-      }
-      processed.push(processedItem)
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-      errors.push(`Error processing niche insight: ${errorMessage}`)
-    }
+function processNicheInsights(rows: any[]): ParseResult<Level2NicheInsightData> {
+  const processed: ParseResult<Level2NicheInsightData> = {
+    data: [],
+    errors: [],
   }
 
-  return { data: processed, errors }
+  // Helper function to find a field with multiple possible names
+  function findField(row: any, possibleNames: string[]): string | undefined {
+    // Case sensitive match first
+    for (const name of possibleNames) {
+      if (row[name] !== undefined) {
+        return row[name]
+      }
+    }
+    
+    // Case insensitive match as fallback
+    const rowKeys = Object.keys(row)
+    for (const name of possibleNames) {
+      const key = rowKeys.find(k => k.toLowerCase() === name.toLowerCase())
+      if (key && row[key] !== undefined) {
+        return row[key]
+      }
+    }
+    
+    return undefined
+  }
+
+  // Debug raw data
+  console.log("Processing niche insights with raw data:", rows)
+
+  // Process each row
+  rows.forEach((row, index) => {
+    try {
+      // Try to extract niche data with multiple possible field names
+      const nameField = findField(row, ['niche', 'category', 'niche name', 'category name', 'name'])
+      const volumeField = findField(row, ['volume', 'search volume', 'monthly volume', 'monthly search volume', 'searches'])
+      const competitionField = findField(row, ['competition', 'comp', 'competition score', 'comp score', 'competition level'])
+      const growthField = findField(row, ['growth', 'growth rate', '90 day growth', '90d growth', 'growth (90d)'])
+      const growth180Field = findField(row, ['180 day growth', '180d growth', 'growth (180d)', '6 month growth'])
+      const trendinessField = findField(row, ['trendiness', 'trend', 'trend score'])
+      const oppScoreField = findField(row, ['opportunity', 'opp', 'opportunity score', 'opp score'])
+      
+      // Skip if no niche name
+      if (!nameField) {
+        processed.errors.push(`Row ${index}: Missing niche name field`)
+        return
+      }
+
+      // Create niche insight object
+      const nicheInsight: Level2NicheInsightData = {
+        Insight_Category: nameField.toString().trim(),
+        Insight: nameField.toString().trim(),
+        Relevance_Score: parseNumberValue(oppScoreField),
+        Supporting_Keywords: "",
+        Notes: `Volume: ${volumeField}, Competition: ${competitionField}, Growth90d: ${growthField}, Growth180d: ${growth180Field}, Trendiness: ${trendinessField}`
+      }
+
+      processed.data.push(nicheInsight)
+    } catch (e: any) {
+      processed.errors.push(`Row ${index}: ${e.message || "Unknown error"}`)
+    }
+  })
+
+  console.log(`Processed ${processed.data.length} niche insights with ${processed.errors.length} errors`)
+  return processed
 }
 
 /**
@@ -703,27 +912,140 @@ function processProducts(data: any[]): ParseResult<Level2ProductData> {
 
   for (const item of data) {
     try {
+      // Debug raw values
+      console.log("Processing product row:", item)
+
+      // Extract product fields with enhanced field name matching
+      // Find the product name by trying various common field names
+      const productNameField = findField(item, [
+        "Product_Name", "product_name", "Product Name", "ProductName", 
+        "Title", "title", "Item Name", "item_name", "Name", "name"
+      ]);
+
+      // Find the ASIN/product identifier
+      const asinField = findField(item, [
+        "ASIN", "asin", "Product ID", "product_id", "ProductID", 
+        "SKU", "sku", "ID", "id", "Identifier", "identifier"
+      ]);
+
+      // Find the brand
+      const brandField = findField(item, [
+        "Brand", "brand", "Manufacturer", "manufacturer", "Vendor", "vendor", "Seller", "seller"
+      ]);
+
+      // Find the price
+      const priceRaw = findField(item, [
+        "Price", "price", "Retail Price", "retail_price", "List Price", "list_price",
+        "Cost", "cost", "MSRP", "msrp", "Amount", "amount"
+      ]);
+      const price = parseNumberValue(priceRaw);
+
+      // Find the rating
+      const ratingRaw = findField(item, [
+        "Rating", "rating", "Star Rating", "star_rating", "Review Rating", 
+        "review_rating", "Stars", "stars", "Score", "score"
+      ]);
+      const rating = parseNumberValue(ratingRaw);
+
+      // Find the review count
+      const reviewCountRaw = findField(item, [
+        "Review_Count", "review_count", "Review Count", "Reviews", "reviews", 
+        "Number of Reviews", "number_of_reviews", "Review Total", "review_total"
+      ]);
+      const reviewCount = parseNumberValue(reviewCountRaw);
+
+      // Find market share
+      const marketShareRaw = findField(item, [
+        "Market_Share", "market_share", "Market Share", "Share", "share",
+        "Market Percentage", "market_percentage"
+      ]);
+      const marketShare = parseNumberValue(marketShareRaw);
+
+      // Find sales estimate
+      const salesEstimateRaw = findField(item, [
+        "Sales_Estimate", "sales_estimate", "Sales Estimate", "Estimated Sales",
+        "estimated_sales", "Sales", "sales", "Volume", "volume"
+      ]);
+      const salesEstimate = parseNumberValue(salesEstimateRaw);
+
+      // Find niche click count
+      const nicheClickCountRaw = findField(item, [
+        "Niche_Click_Count", "niche_click_count", "Niche Click Count", "Clicks", 
+        "clicks", "Total Clicks", "total_clicks"
+      ]);
+      const nicheClickCount = parseNumberValue(nicheClickCountRaw);
+
+      // Find BSR (Best Seller Rank)
+      const bsrRaw = findField(item, [
+        "BSR", "bsr", "Best Seller Rank", "best_seller_rank", "Sales Rank", 
+        "sales_rank", "Rank", "rank"
+      ]);
+      const bsr = parseNumberValue(bsrRaw);
+
+      // Find click share
+      const clickShareRaw = findField(item, [
+        "Click_Share", "click_share", "Click Share", "CTR", "ctr", 
+        "Click Through Rate", "click_through_rate"
+      ]);
+      const clickShare = parseNumberValue(clickShareRaw);
+
       const processedItem: Level2ProductData = {
-        ASIN: item.ASIN || item.asin || undefined,
-        Product_Name: String(item.Product_Name || item.product_name || item.name || ""),
-        Brand: item.Brand || item.brand || undefined,
-        Price: item.Price || item.price ? Number(item.Price || item.price) : undefined,
-        Rating: item.Rating || item.rating ? Number(item.Rating || item.rating) : undefined,
-        Review_Count: item.Review_Count || item.review_count ? Number(item.Review_Count || item.review_count) : undefined,
-        Market_Share: item.Market_Share || item.market_share ? Number(item.Market_Share || item.market_share) : undefined,
-        Sales_Estimate: item.Sales_Estimate || item.sales_estimate ? Number(item.Sales_Estimate || item.sales_estimate) : undefined,
-        Niche_Click_Count: item.Niche_Click_Count || item.niche_click_count ? Number(item.Niche_Click_Count || item.niche_click_count) : undefined,
-        BSR: item.BSR || item.bsr ? Number(item.BSR || item.bsr) : undefined,
-        Click_Share: item.Click_Share || item.click_share ? Number(item.Click_Share || item.click_share) : undefined
+        ASIN: asinField,
+        Product_Name: productNameField ? String(productNameField) : "",
+        Brand: brandField,
+        Price: price,
+        Rating: rating,
+        Review_Count: reviewCount,
+        Market_Share: marketShare,
+        Sales_Estimate: salesEstimate,
+        Niche_Click_Count: nicheClickCount,
+        BSR: bsr,
+        Click_Share: clickShare
       }
+
+      // Skip products without a name
+      if (!processedItem.Product_Name) {
+        console.log("Skipping product row: Missing product name");
+        continue;
+      }
+
+      // Debug processed values
+      console.log("Processed product:", processedItem)
+
       processed.push(processedItem)
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       errors.push(`Error processing product: ${errorMessage}`)
+      console.error("Error processing product row:", error)
     }
   }
 
   return { data: processed, errors }
+}
+
+/**
+ * Helper function to find a field value from an object using various possible field names
+ */
+function findField(item: any, possibleFieldNames: string[]): any {
+  for (const fieldName of possibleFieldNames) {
+    if (item[fieldName] !== undefined) {
+      return item[fieldName];
+    }
+  }
+  
+  // Try case-insensitive matching as a fallback
+  const lowerCaseFieldNames = possibleFieldNames.map(name => name.toLowerCase());
+  const itemKeys = Object.keys(item);
+  
+  for (const key of itemKeys) {
+    const lowerKey = key.toLowerCase();
+    const matchIndex = lowerCaseFieldNames.findIndex(name => lowerKey.includes(name));
+    if (matchIndex >= 0) {
+      return item[key];
+    }
+  }
+  
+  return undefined;
 }
 
 /**
@@ -907,7 +1229,7 @@ export async function parseLevel1Data(file: File): Promise<{
 
     if (fileType === "csv") {
       const csvText = await parseCSVAsText(file)
-      const { headers, rows: csvRows, headerRowIndex } = parseCSV(csvText)
+      const { headers, rows: csvRows, headerRowIndex, metadata } = parseCSV(csvText)
       rows = csvRows
       headerInfo += `CSV header row detected at line ${headerRowIndex + 1}\n`
       headerInfo += `CSV headers detected: ${headers.join(", ")}\n`
@@ -950,6 +1272,7 @@ export async function parseLevel2Data(file: File): Promise<{
   products: { data: any[]; errors: string[] }
   headerInfo: string
   sheetNames?: string[]
+  metadata?: Record<string, string>
 }> {
   try {
     const fileType = detectFileType(file.name)
@@ -962,9 +1285,12 @@ export async function parseLevel2Data(file: File): Promise<{
       sheetNames?: string[]
     }
 
+    let metadata: Record<string, string> | undefined
+
     if (fileType === "csv") {
       const csvText = await parseCSVAsText(file)
-      const { headers, rows, headerRowIndex } = parseCSV(csvText)
+      const { headers, rows, headerRowIndex, metadata: md } = parseCSV(csvText)
+      metadata = md
       headerInfo += `CSV header row detected at line ${headerRowIndex + 1}\n`
       headerInfo += `CSV headers detected: ${headers.join(", ")}\n`
 
@@ -990,7 +1316,7 @@ Processing summary:
 - Products: ${result.products.data.length} rows (${result.products.errors.length} errors)
 `
 
-    return { ...result, headerInfo }
+    return { ...result, headerInfo, metadata }
   } catch (error) {
     console.error("Error parsing Level 2 data:", error)
     return {
@@ -998,6 +1324,7 @@ Processing summary:
       nicheInsights: { data: [], errors: [] },
       products: { data: [], errors: [] },
       headerInfo: `Error: ${(error as Error).message}`,
+      metadata: undefined
     }
   }
 }

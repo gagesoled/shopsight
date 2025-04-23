@@ -1,13 +1,12 @@
-import * as XLSX from "xlsx"
+import * as XLSX from "xlsx-js-style"
 import { z } from "zod"
 import {
-  Level2SearchTermSchema,
+  Level1Schema,
+  Level2SearchTermDataSchema,
   Level2NicheInsightSchema,
   Level2ProductSchema,
-  type Level2SearchTermData,
-  type Level2NicheInsightData,
-  type Level2ProductData,
-} from "@/lib/schemas"
+  Level3Schema,
+} from "../validation"
 
 /**
  * Parse Excel file with multiple sheets
@@ -75,16 +74,21 @@ function normalizeHeader(header: string): string {
  * Process Excel workbook with multiple sheets
  */
 export function processExcelWorkbook(buffer: ArrayBuffer): {
-  searchTerms: { data: any[]; errors: string[] }
-  nicheInsights: { data: any[]; errors: string[] }
-  products: { data: any[]; errors: string[] }
+  searchTerms: { data: z.infer<typeof Level2SearchTermDataSchema>[]; errors: string[] }
+  nicheInsights: { data: z.infer<typeof Level2NicheInsightSchema>[]; errors: string[] }
+  products: { data: z.infer<typeof Level2ProductSchema>[]; errors: string[] }
   sheetNames: string[]
 } {
   const workbook = XLSX.read(buffer, { type: "array" })
   const sheetNames = workbook.SheetNames
 
   // Initialize results
-  const result = {
+  const result: {
+    searchTerms: { data: z.infer<typeof Level2SearchTermDataSchema>[]; errors: string[] }
+    nicheInsights: { data: z.infer<typeof Level2NicheInsightSchema>[]; errors: string[] }
+    products: { data: z.infer<typeof Level2ProductSchema>[]; errors: string[] }
+    sheetNames: string[]
+  } = {
     searchTerms: { data: [], errors: [] },
     nicheInsights: { data: [], errors: [] },
     products: { data: [], errors: [] },
@@ -92,7 +96,7 @@ export function processExcelWorkbook(buffer: ArrayBuffer): {
   }
 
   // Process each sheet based on its name or position
-  sheetNames.forEach((sheetName, index) => {
+  sheetNames.forEach((sheetName: string, index: number) => {
     const worksheet = workbook.Sheets[sheetName]
     const jsonData = XLSX.utils.sheet_to_json(worksheet, { raw: false })
 
@@ -125,8 +129,8 @@ export function processExcelWorkbook(buffer: ArrayBuffer): {
 /**
  * Process search terms data
  */
-function processSearchTerms(data: any[]): { data: Level2SearchTermData[]; errors: string[] } {
-  const validData: Level2SearchTermData[] = []
+function processSearchTerms(data: any[]): { data: z.infer<typeof Level2SearchTermDataSchema>[]; errors: string[] } {
+  const validData: z.infer<typeof Level2SearchTermDataSchema>[] = []
   const errors: string[] = []
 
   for (let i = 0; i < data.length; i++) {
@@ -151,7 +155,7 @@ function processSearchTerms(data: any[]): { data: Level2SearchTermData[]; errors
       }
 
       // Validate with schema
-      const validatedRow = Level2SearchTermSchema.parse(processedRow)
+      const validatedRow = Level2SearchTermDataSchema.parse(processedRow)
       validData.push(validatedRow)
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -169,8 +173,8 @@ function processSearchTerms(data: any[]): { data: Level2SearchTermData[]; errors
 /**
  * Process niche insights data
  */
-function processNicheInsights(data: any[]): { data: Level2NicheInsightData[]; errors: string[] } {
-  const validData: Level2NicheInsightData[] = []
+function processNicheInsights(data: any[]): { data: z.infer<typeof Level2NicheInsightSchema>[]; errors: string[] } {
+  const validData: z.infer<typeof Level2NicheInsightSchema>[] = []
   const errors: string[] = []
 
   for (let i = 0; i < data.length; i++) {
@@ -210,8 +214,8 @@ function processNicheInsights(data: any[]): { data: Level2NicheInsightData[]; er
 /**
  * Process products data
  */
-function processProducts(data: any[]): { data: Level2ProductData[]; errors: string[] } {
-  const validData: Level2ProductData[] = []
+function processProducts(data: any[]): { data: z.infer<typeof Level2ProductSchema>[]; errors: string[] } {
+  const validData: z.infer<typeof Level2ProductSchema>[] = []
   const errors: string[] = []
 
   for (let i = 0; i < data.length; i++) {

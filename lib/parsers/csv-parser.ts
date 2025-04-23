@@ -1,13 +1,17 @@
-import * as XLSX from "xlsx"
+import * as XLSX from "xlsx-js-style"
 import { z } from "zod"
 import {
   Level1Schema,
-  Level2Schema,
+  Level2SearchTermDataSchema,
+  Level2NicheInsightSchema,
+  Level2ProductSchema,
   Level3Schema,
   type Level1Data,
-  type Level2Data,
+  type Level2SearchTermData,
+  type Level2NicheInsightData,
+  type Level2ProductData,
   type Level3Data,
-} from "@/lib/schemas"
+} from "../validation"
 
 /**
  * Parse Excel/CSV files into structured data
@@ -223,7 +227,7 @@ export function excelToJson(
         headerInfo += `  New best match\n`
       }
     }
-    // If no expected headers provided, use the first row that looks like headers
+    // If we couldn't find a good header row, fall back to the default behavior
     else if (potentialHeaderRow) {
       headerRowIndex = r
       headers = rowHeaders
@@ -457,9 +461,11 @@ export async function parseLevel1Data(file: File): Promise<{
   }
 }
 
-// Other parsing functions remain the same...
+/**
+ * Parse and validate Level 2 data (Search Term Data)
+ */
 export async function parseLevel2Data(file: File): Promise<{
-  data: Level2Data[]
+  data: Level2SearchTermData[]
   errors: string[]
   headerInfo: string
 }> {
@@ -479,7 +485,7 @@ export async function parseLevel2Data(file: File): Promise<{
     const { data: rawData, headerInfo } = excelToJson(buffer, expectedHeaders)
 
     const errors: string[] = []
-    const validData: Level2Data[] = []
+    const validData: Level2SearchTermData[] = []
 
     for (let i = 0; i < rawData.length; i++) {
       const row = rawData[i]
@@ -497,10 +503,9 @@ export async function parseLevel2Data(file: File): Promise<{
           Click_Share: Number.parseFloat(row.Click_Share) || 0,
           Conversion_Rate: Number.parseFloat(row.Conversion_Rate) || 0,
           // Handle Top_Products as a string or array
-          Top_Products:
-            typeof row.Top_Products === "string"
-              ? row.Top_Products.split(",").map((asin: string) => asin.trim())
-              : row.Top_Products || [],
+          Top_Clicked_Product_1_ASIN: Array.isArray(row.Top_Products) ? row.Top_Products[0] : undefined,
+          Top_Clicked_Product_2_ASIN: Array.isArray(row.Top_Products) ? row.Top_Products[1] : undefined,
+          Top_Clicked_Product_3_ASIN: Array.isArray(row.Top_Products) ? row.Top_Products[2] : undefined,
           Format_Inferred: row.Format_Inferred || undefined,
           Function_Inferred: row.Function_Inferred || undefined,
         }
@@ -511,7 +516,7 @@ export async function parseLevel2Data(file: File): Promise<{
         }
 
         // Validate with Zod schema
-        const validatedRow = Level2Schema.parse(processedRow)
+        const validatedRow = Level2SearchTermDataSchema.parse(processedRow)
         validData.push(validatedRow)
       } catch (error) {
         if (error instanceof z.ZodError) {

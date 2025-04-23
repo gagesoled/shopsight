@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     console.log(`Processing Level 2 file: ${file.name} (${file.type}, ${file.size} bytes)`)
 
     // Parse and validate the file
-    const { searchTerms, nicheInsights, products, headerInfo, sheetNames } = await parseLevel2Data(file)
+    const { searchTerms, nicheInsights, products, headerInfo, sheetNames, metadata } = await parseLevel2Data(file)
 
     console.log(`Parsing results: ${searchTerms.data.length} search terms, ${products.data.length} products`)
 
@@ -92,6 +92,7 @@ export async function POST(req: NextRequest) {
       success: true,
       message: "Level 2 file processed successfully",
       headerInfo,
+      metadata,
       warnings: allErrors.length > 0 ? `Processed with ${allErrors.length} validation warnings` : undefined,
       data: {
         searchTerms: searchTerms.data,

@@ -1,4 +1,4 @@
-import type { Tag } from "@/lib/schemas"
+import type { Tag } from "../validation"
 
 /**
  * Apply tags to a keyword based on the provided tag rules

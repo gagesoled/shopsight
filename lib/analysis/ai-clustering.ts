@@ -1,6 +1,15 @@
 import { OpenAI } from "openai"
-import type { Level2SearchTermData } from "@/lib/schemas"
+import type { Level2SearchTermData } from "../validation"
+import type { HierarchicalCluster } from "./types"
+import type { EmbeddingResult } from "./embeddings"
+import type { MetadataAnalysis } from "./metadata"
 const clustering = require('density-clustering')
+
+interface SearchTermData extends Level2SearchTermData {
+  competition?: number
+  values_inferred?: string[]
+  format_inferred?: string
+}
 
 interface DBSCANInstance {
   run(points: number[][], epsilon: number, minPts: number): number[][];
@@ -18,18 +27,18 @@ export interface AICluster {
     clickShare: number
     embedding: number[]
   }>
-  description?: string
-  tags?: Array<{
-    category: string
-    value: string
-    confidence: number
-  }>
-  metrics?: {
-    totalVolume: number
-    avgGrowth: number
-    avgCompetition: number
-    opportunityScore: number
+  description: string
+  tags: string[]
+  confidence: number
+  evidence: {
+    keyTerms: string[]
+    keyMetrics: { name: string; value: number; significance: string }[]
+    supportingTags: string[]
   }
+  parentId?: string
+  children?: HierarchicalCluster[]
+  level: number
+  similarity: number
   temporalMetrics?: TemporalMetrics
   history?: Array<{
     timestamp: Date
@@ -38,31 +47,7 @@ export interface AICluster {
     competition: number
     terms: string[]
   }>
-  level: number
-  similarity: number
   metadataAnalysis?: MetadataAnalysis
-}
-
-interface EmbeddingResult {
-  term: string
-  volume: number
-  clickShare: number
-  growth?: number
-  competition?: number
-  embedding: number[]
-  metadata?: Record<string, any>
-}
-
-async function generateEmbedding(text: string, openai: OpenAI): Promise<number[]> {
-  const response = await openai.embeddings.create({
-    model: "text-embedding-3-small",
-    input: text,
-  })
-  return response.data[0].embedding
-}
-
-interface Cluster {
-  terms: EmbeddingResult[]
 }
 
 interface TemporalMetrics {
@@ -72,72 +57,6 @@ interface TemporalMetrics {
   competitionTrend: number[]
   stability: number
   emergenceScore: number
-}
-
-interface HierarchicalCluster extends Cluster {
-  parentId?: string
-  children?: HierarchicalCluster[]
-  level: number
-  similarity: number
-  temporalMetrics?: TemporalMetrics
-  history?: {
-    timestamp: Date
-    volume: number
-    clickShare: number
-    competition: number
-    terms: string[]
-  }[]
-  tags?: Array<{
-    category: string
-    value: string
-    confidence: number
-  }>
-}
-
-interface MetadataAnalysis {
-  patterns: {
-    functionPatterns: Array<{
-      pattern: string
-      confidence: number
-      terms: string[]
-    }>
-    formatPatterns: Array<{
-      pattern: string
-      confidence: number
-      terms: string[]
-    }>
-    valuePatterns: Array<{
-      pattern: string
-      confidence: number
-      terms: string[]
-    }>
-  }
-  relationships: {
-    functionFormatPairs: Array<{
-      function: string
-      format: string
-      confidence: number
-      terms: string[]
-    }>
-    functionValuePairs: Array<{
-      function: string
-      value: string
-      confidence: number
-      terms: string[]
-    }>
-    formatValuePairs: Array<{
-      format: string
-      value: string
-      confidence: number
-      terms: string[]
-    }>
-  }
-  insights: Array<{
-    type: 'function' | 'format' | 'value' | 'relationship'
-    description: string
-    confidence: number
-    supportingTerms: string[]
-  }>
 }
 
 interface TrendClassification {
@@ -410,78 +329,103 @@ export async function runAIClustering(
     searchTerms: Level2SearchTermData[]
   }[]
 ): Promise<AICluster[]> {
-  // Generate embeddings for each search term with additional metadata
-  const embeddings = await Promise.all(
-    searchTerms.map(async (term) => {
-      const embedding = await generateEmbedding(term.Search_Term, openai)
-      return {
-        term: term.Search_Term,
-        volume: term.Volume,
-        clickShare: term.Click_Share || 0,
-        growth: term.Growth_180,
-        competition: term.Competition,
-        embedding,
-        metadata: {
-          function: term.Function_Inferred,
-          format: term.Format_Inferred,
-          values: term.Values_Inferred,
-        }
-      }
-    })
-  )
-
-  // Cluster the embeddings with dynamic parameters
-  const clusters = await clusterEmbeddings(embeddings)
-
-  // If historical data is available, analyze temporal patterns
-  if (historicalData) {
-    await analyzeTemporalPatterns(clusters, historicalData, openai)
+  if (!searchTerms?.length) {
+    throw new Error('No search terms provided for clustering')
   }
 
-  // Generate descriptions and tags for each cluster
-  return await Promise.all(
-    clusters.map(async (cluster) => {
-      const keywords = cluster.terms.map((t) => t.term)
-      const description = await generateClusterDescription(
-        keywords,
-        openai,
-        {
-          searchVolume: cluster.terms.reduce((sum, t) => sum + t.volume, 0),
-          growth: cluster.terms.reduce((sum, t) => sum + (t.growth || 0), 0) / cluster.terms.length,
-          clickShare: cluster.terms.reduce((sum, t) => sum + t.clickShare, 0) / cluster.terms.length
-        },
-        cluster.tags
-      )
-      const tags = await extractSemanticTags(keywords, openai)
-      const metadataAnalysis = await analyzeMetadata(cluster, openai)
+  try {
+    // Generate embeddings with retries
+    const embeddings = await Promise.all(
+      searchTerms.map(async term => {
+        let retries = 3
+        while (retries > 0) {
+          try {
+            const embedding = await generateEmbedding(term.Search_Term, openai)
+            return {
+              term: term.Search_Term,
+              volume: term.Volume,
+              clickShare: term.Click_Share || 0,
+              growth: term.Growth_180,
+              competition: term.Competition,
+              embedding,
+              metadata: {
+                function: term.Function_Inferred,
+                format: term.Format_Inferred,
+                values: term.Values_Inferred,
+              }
+            }
+          } catch (err) {
+            retries--
+            if (retries === 0) throw err
+            await new Promise(resolve => setTimeout(resolve, 1000))
+          }
+        }
+      })
+    )
 
-      // Calculate cluster metrics
-      const totalVolume = cluster.terms.reduce((sum, t) => sum + t.volume, 0)
-      const avgGrowth = cluster.terms.reduce((sum, t) => sum + (t.growth || 0), 0) / cluster.terms.length
-      const avgCompetition = cluster.terms.reduce((sum, t) => sum + (t.competition || 0), 0) / cluster.terms.length
+    // Filter out any failed embeddings
+    const validEmbeddings = embeddings.filter(e => e !== undefined) as EmbeddingResult[]
+    
+    if (validEmbeddings.length < 2) {
+      throw new Error('Insufficient valid embeddings generated for clustering')
+    }
 
-      return {
-        terms: cluster.terms,
-        description: description.behavioralInsight,
-        title: description.title,
-        summary: description.summary,
-        confidence: description.confidence,
-        evidence: description.evidence,
-        tags,
-        metrics: {
-          totalVolume,
-          avgGrowth,
-          avgCompetition,
-          opportunityScore: calculateOpportunityScore(totalVolume, avgGrowth, avgCompetition)
-        },
-        temporalMetrics: cluster.temporalMetrics,
-        history: cluster.history,
-        level: cluster.level,
-        similarity: cluster.similarity,
-        metadataAnalysis
+    // Continue with clustering
+    const clusters = await clusterEmbeddings(validEmbeddings)
+    
+    // Process historical data if available
+    let temporalPatterns = undefined
+    if (historicalData?.length) {
+      try {
+        temporalPatterns = await analyzeTemporalPatterns(clusters, historicalData, openai)
+      } catch (err) {
+        console.error('Failed to analyze temporal patterns:', err)
       }
-    })
-  )
+    }
+
+    // Generate descriptions and tags
+    const enrichedClusters: AICluster[] = await Promise.all(
+      clusters.map(async cluster => {
+        try {
+          const { description, tags } = await generateClusterMetadata(cluster)
+          return {
+            ...cluster,
+            description,
+            tags,
+            title: cluster.title || `Cluster ${cluster.id}`,
+            summary: cluster.summary || '',
+            confidence: cluster.confidence || 0,
+            evidence: cluster.evidence || {
+              keyTerms: [],
+              keyMetrics: [],
+              supportingTags: []
+            }
+          } as AICluster
+        } catch (err) {
+          console.error('Failed to generate cluster metadata:', err)
+          return {
+            ...cluster,
+            description: '',
+            tags: [],
+            title: `Cluster ${cluster.id}`,
+            summary: '',
+            confidence: 0,
+            evidence: {
+              keyTerms: [],
+              keyMetrics: [],
+              supportingTags: []
+            }
+          } as AICluster
+        }
+      })
+    )
+
+    return enrichedClusters
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
+    console.error('AI Clustering failed:', errorMessage)
+    throw new Error(`AI Clustering failed: ${errorMessage}`)
+  }
 }
 
 async function clusterEmbeddings(embeddings: EmbeddingResult[]): Promise<HierarchicalCluster[]> {
@@ -492,9 +436,28 @@ async function clusterEmbeddings(embeddings: EmbeddingResult[]): Promise<Hierarc
   // Convert embeddings to array of arrays for DBSCAN
   const points = embeddings.map(e => e.embedding)
   
-  // Dynamic parameter calculation based on dataset size and characteristics
-  const minPts = Math.max(2, Math.floor(embeddings.length * 0.05)) // At least 5% of terms or 2
-  const epsilon = 0.3 // Distance threshold for neighborhood calculation
+  // Dynamic parameter calculation based on dataset characteristics
+  const minPts = Math.max(
+    3,
+    Math.min(
+      Math.floor(Math.sqrt(embeddings.length)),
+      Math.floor(embeddings.length * 0.1)
+    )
+  )
+  
+  // Calculate epsilon dynamically based on the average distance between points
+  const sampleSize = Math.min(100, points.length)
+  const distances: number[] = []
+  for (let i = 0; i < sampleSize; i++) {
+    const point = points[Math.floor(Math.random() * points.length)]
+    for (let j = 0; j < sampleSize; j++) {
+      if (i !== j) {
+        const otherPoint = points[Math.floor(Math.random() * points.length)]
+        distances.push(1 - cosineSimilarity(point, otherPoint))
+      }
+    }
+  }
+  const epsilon = distances.reduce((a, b) => a + b, 0) / distances.length
   
   // Initialize DBSCAN
   const dbscan = new clustering.DBSCAN() as DBSCANInstance
@@ -1738,5 +1701,31 @@ For each niche, provide a JSON response with:
         }
       }
     })
+  }
+}
+
+async function generateClusterMetadata(terms: EmbeddingResult[]): MetadataAnalysis {
+  const totalVolume = terms.reduce((sum, term) => sum + (term.volume || 0), 0)
+  const avgGrowth = terms.reduce((sum, term) => sum + (term.growth || 0), 0) / terms.length
+  const maxCompetition = Math.max(...terms.map(term => term.competition || 0))
+  const avgValues = terms.reduce((sum, term) => sum + (term.values || 0), 0) / terms.length
+
+  return {
+    volume: totalVolume,
+    growth: avgGrowth,
+    competition: maxCompetition,
+    values: avgValues,
+    terms: terms.map(t => t.term)
+  }
+}
+
+function createCluster(terms: EmbeddingResult[], id: string, parentId?: string): HierarchicalCluster {
+  return {
+    terms,
+    id,
+    parentId,
+    level: 0,
+    similarity: 0,
+    metadataAnalysis: generateClusterMetadata(terms)
   }
 } 

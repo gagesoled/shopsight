@@ -1,4 +1,4 @@
-import type { Level2SearchTermData, Tag } from "@/lib/schemas"
+import type { Level2SearchTermData, Tag } from "../validation"
 import { applyTags } from "@/lib/analysis/tagging"
 
 interface ClusterResult {

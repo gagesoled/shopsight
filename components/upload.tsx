@@ -27,6 +27,10 @@ interface HeaderInfo {
   normalizedHeaders?: string[]
   details?: string
   rawInfo?: string
+  metadata?: {
+    niche_name?: string
+    last_updated?: string
+  }
 }
 
 export function Upload({ 
@@ -156,13 +160,17 @@ export function Upload({
         return
       }
 
-      // Display header detection info if available 
-      if (result.headerInfo) {
-        if (typeof result.headerInfo === 'string') {
-          setHeaderInfo({ rawInfo: result.headerInfo })
-        } else {
-          setHeaderInfo(result.headerInfo)
-        }
+      // Display header detection info and metadata if available
+      if (result.headerInfo || result.metadata) {
+        // Prepare base header info object
+        const baseHeaderInfo = typeof result.headerInfo === 'string'
+          ? { rawInfo: result.headerInfo }
+          : (result.headerInfo || {})
+        // Merge metadata into headerInfo state
+        setHeaderInfo({
+          ...baseHeaderInfo,
+          metadata: result.metadata,
+        })
       }
 
       // Display warnings if available
@@ -353,6 +361,21 @@ export function Upload({
 
       {(error || validationErrors.length > 0 || headerInfo || warnings) && (
         <div className="mt-4">
+          {/* Display metadata if available */}
+          {headerInfo?.metadata?.niche_name && (
+            <Alert className="mb-2">
+              <Info className="h-4 w-4" />
+              <AlertTitle>Niche Name</AlertTitle>
+              <AlertDescription>{headerInfo.metadata.niche_name}</AlertDescription>
+            </Alert>
+          )}
+          {headerInfo?.metadata?.last_updated && (
+            <Alert className="mb-2">
+              <Info className="h-4 w-4" />
+              <AlertTitle>Last Updated</AlertTitle>
+              <AlertDescription>{headerInfo.metadata.last_updated}</AlertDescription>
+            </Alert>
+          )}
           <Accordion type="single" collapsible>
             <AccordionItem value="details">
               <AccordionTrigger>Details</AccordionTrigger>
