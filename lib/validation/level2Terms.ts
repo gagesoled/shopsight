@@ -11,8 +11,13 @@ export const Level2SearchTermDataSchema = z.object({
   Top_Clicked_Product_1_Title: z.string().optional(),
   Top_Clicked_Product_2_Title: z.string().optional(),
   Top_Clicked_Product_3_Title: z.string().optional(),
+  Top_Clicked_Product_1_ASIN: z.string().optional(),
+  Top_Clicked_Product_2_ASIN: z.string().optional(),
+  Top_Clicked_Product_3_ASIN: z.string().optional(),
   Format_Inferred: z.string().optional(),
   Function_Inferred: z.string().optional(),
+  Values_Inferred: z.string().optional(),
+  Competition: z.number().optional(),
 })
 
 export type Level2SearchTermData = z.infer<typeof Level2SearchTermDataSchema>

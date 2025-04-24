@@ -23,6 +23,8 @@ interface Cluster {
   opportunityScore: number
   keywords: string[]
   tags: Tag[]
+  searchVolume: number
+  clickShare: number
 }
 
 interface SearchTerm {
@@ -34,6 +36,9 @@ interface SearchTerm {
   Conversion_Rate?: number
   Format_Inferred?: string
   Function_Inferred?: string
+  Top_Clicked_Product_1_Title?: string
+  Top_Clicked_Product_2_Title?: string
+  Top_Clicked_Product_3_Title?: string
 }
 
 interface NicheInsight {
@@ -58,6 +63,13 @@ interface Product {
   Click_Share?: number
 }
 
+interface Level2UploadResponseData {
+  searchTerms: SearchTerm[]
+  nicheInsights: NicheInsight[]
+  products: Product[]
+  clusters: Cluster[]
+}
+
 export default function NicheExplorer() {
   const [selectedNiche, setSelectedNiche] = useState<string | null>(null)
   const [clusters, setClusters] = useState<Cluster[]>([])
@@ -70,6 +82,27 @@ export default function NicheExplorer() {
   const [level2Loaded, setLevel2Loaded] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null)
 
+  // Helper function to format percentage values
+  const formatPercentage = (value: number | undefined | null): string => {
+    if (value === undefined || value === null || isNaN(Number(value))) {
+      return "N/A";
+    }
+    return `${(value * 100).toFixed(1)}%`;
+  };
+
+  // Helper function for growth badge
+  const renderGrowthBadge = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) {
+      return <Badge variant="outline">N/A</Badge>;
+    }
+    const isPositive = value >= 0;
+    return (
+      <Badge variant={isPositive ? "default" : "destructive"}>
+        {isPositive ? '+' : ''}{(value * 100).toFixed(1)}%
+      </Badge>
+    );
+  };
+
   useEffect(() => {
     // Get selected niche from localStorage
     const niche = localStorage.getItem("selectedNiche")
@@ -78,51 +111,64 @@ export default function NicheExplorer() {
     }
   }, [])
 
-  const handleLevel2Success = (data: {
-    searchTerms: SearchTerm[]
-    nicheInsights: NicheInsight[]
-    products: Product[]
-    clusters: Cluster[]
-  }) => {
-    setSearchTerms(data.searchTerms)
-    setNicheInsights(data.nicheInsights)
-    setProducts(data.products)
-    setClusters(data.clusters)
-    setLevel2Loaded(true)
+  const handleLevel2Success = (data: Level2UploadResponseData) => {
+    setSearchTerms(data.searchTerms || []);
+    setNicheInsights(data.nicheInsights || []);
+    setProducts(data.products || []);
+    setClusters(data.clusters || []);
+    setLevel2Loaded(true);
   }
 
-  const handleSelectProduct = (asin: string) => {
-    setSelectedProduct(asin)
+  const handleSelectProduct = (asin: string | undefined) => {
+    if (!asin) {
+      console.warn("Cannot navigate: ASIN is undefined for the selected product.");
+      return;
+    }
+    setSelectedProduct(asin);
     // Navigate to product keyword view with the selected product
-    window.location.href = `/product-keywords?asin=${asin}`
+    window.location.href = `/product-keywords?asin=${asin}`;
   }
 
   const handleGenerateSummary = async () => {
-    if (!clusters.length) return
+    if (!clusters.length) return;
 
-    setIsGeneratingSummary(true)
-    setSummaryError(null)
+    setIsGeneratingSummary(true);
+    setSummaryError(null);
 
     try {
+      // Prepare cluster data for the API
+      const clusterDataForApi = clusters.map(c => ({
+        id: c.id,
+        name: c.name,
+        description: c.description,
+        opportunityScore: c.opportunityScore,
+        keywords: c.keywords,
+        tags: c.tags,
+        // Include any other metrics needed by the API
+        searchVolume: c.searchVolume,
+        clickShare: c.clickShare,
+      }));
+
       const response = await fetch("/api/generate-summary", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ clusters }),
-      })
+        body: JSON.stringify({ clusters: clusterDataForApi }),
+      });
 
-      const result = await response.json()
+      const result = await response.json();
 
-      if (!response.ok) {
-        throw new Error(result.message || "Failed to generate summary")
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Failed to generate summary");
       }
 
-      setSummary(result.data.summary)
+      // Ensure result.data.summary exists
+      setSummary(result.data?.summary ?? "No summary content received.");
     } catch (error) {
-      setSummaryError((error as Error).message || "An error occurred")
+      setSummaryError((error as Error).message || "An error occurred");
     } finally {
-      setIsGeneratingSummary(false)
+      setIsGeneratingSummary(false);
     }
   }
 
@@ -185,18 +231,20 @@ export default function NicheExplorer() {
                   <CardDescription>AI-generated summary of key trends and opportunities</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {summary ? (
-                    <div className="p-6 border rounded-lg bg-muted/50 prose max-w-none">
-                      <div dangerouslySetInnerHTML={{ __html: summary.replace(/\n/g, "<br />") }} />
-                    </div>
-                  ) : summaryError ? (
+                  {summaryError ? (
                     <Alert variant="destructive" className="mb-4">
                       <AlertDescription>{summaryError}</AlertDescription>
                     </Alert>
+                  ) : summary ? (
+                    <div className="p-6 border rounded-lg bg-muted/50 prose prose-sm max-w-none dark:prose-invert">
+                      {summary.split('\n').map((line, index) => (
+                        <p key={index}>{line || <br />}</p>
+                      ))}
+                    </div>
                   ) : (
-                    <div className="p-6 border rounded-lg bg-muted/50">
+                    <div className="p-6 border rounded-lg bg-muted/50 text-center">
                       <p className="text-muted-foreground italic">
-                        Click "Generate Summary" to see AI-powered insights
+                        Click "Generate Summary" to get AI-powered insights based on the clusters above.
                       </p>
                     </div>
                   )}
@@ -221,7 +269,7 @@ export default function NicheExplorer() {
             <Card>
               <CardHeader>
                 <CardTitle>Search Terms</CardTitle>
-                <CardDescription>Search terms related to this niche</CardDescription>
+                <CardDescription>Search terms related to this niche (from uploaded data)</CardDescription>
               </CardHeader>
               <CardContent>
                 {searchTerms.length > 0 ? (
@@ -230,38 +278,36 @@ export default function NicheExplorer() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Search Term</TableHead>
-                          <TableHead>Volume</TableHead>
-                          <TableHead>Growth (180d)</TableHead>
-                          <TableHead>Growth (90d)</TableHead>
-                          <TableHead>Format</TableHead>
-                          <TableHead>Function</TableHead>
+                          <TableHead className="text-right">Volume</TableHead>
+                          <TableHead className="text-right">Growth (90d)</TableHead>
+                          <TableHead className="text-right">Growth (180d)</TableHead>
+                          <TableHead className="text-right">Click Share</TableHead>
+                          <TableHead className="text-right">Conversion Rate</TableHead>
+                          <TableHead>Top Product 1</TableHead>
+                          <TableHead>Top Product 2</TableHead>
+                          <TableHead>Top Product 3</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {searchTerms.map((term, index) => (
                           <TableRow key={index}>
-                            <TableCell>{term.Search_Term}</TableCell>
-                            <TableCell>{term.Volume.toLocaleString()}</TableCell>
-                            <TableCell>
-                              {term.Growth_180 !== undefined ? (
-                                <Badge variant={term.Growth_180 > 0 ? "default" : "destructive"}>
-                                  {(term.Growth_180 * 100).toFixed(1)}%
-                                </Badge>
-                              ) : (
-                                "N/A"
-                              )}
+                            <TableCell className="font-medium">{term.Search_Term}</TableCell>
+                            <TableCell className="text-right">{term.Volume?.toLocaleString() ?? 'N/A'}</TableCell>
+                            <TableCell className="text-right">
+                              {renderGrowthBadge(term.Growth_90)}
                             </TableCell>
-                            <TableCell>
-                              {term.Growth_90 !== undefined ? (
-                                <Badge variant={term.Growth_90 > 0 ? "default" : "destructive"}>
-                                  {(term.Growth_90 * 100).toFixed(1)}%
-                                </Badge>
-                              ) : (
-                                "N/A"
-                              )}
+                            <TableCell className="text-right">
+                              {renderGrowthBadge(term.Growth_180)}
                             </TableCell>
-                            <TableCell>{term.Format_Inferred || "N/A"}</TableCell>
-                            <TableCell>{term.Function_Inferred || "N/A"}</TableCell>
+                            <TableCell className="text-right">
+                              {formatPercentage(term.Click_Share)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {formatPercentage(term.Conversion_Rate)}
+                            </TableCell>
+                            <TableCell className="text-xs truncate max-w-xs">{term.Top_Clicked_Product_1_Title ?? 'N/A'}</TableCell>
+                            <TableCell className="text-xs truncate max-w-xs">{term.Top_Clicked_Product_2_Title ?? 'N/A'}</TableCell>
+                            <TableCell className="text-xs truncate max-w-xs">{term.Top_Clicked_Product_3_Title ?? 'N/A'}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -269,7 +315,7 @@ export default function NicheExplorer() {
                   </div>
                 ) : (
                   <div className="text-center p-10 border rounded-lg border-dashed">
-                    <p className="text-muted-foreground">No search terms data available</p>
+                    <p className="text-muted-foreground">No search terms data available in the uploaded file.</p>
                   </div>
                 )}
               </CardContent>
@@ -361,7 +407,7 @@ export default function NicheExplorer() {
                               {product.Review_Count !== undefined ? product.Review_Count.toLocaleString() : "N/A"}
                             </TableCell>
                             <TableCell>
-                              {product.Click_Share !== undefined ? `${(product.Click_Share * 100).toFixed(1)}%` : "N/A"}
+                              {formatPercentage(product.Click_Share)}
                             </TableCell>
                             <TableCell>
                               {product.Niche_Click_Count !== undefined
@@ -392,8 +438,8 @@ export default function NicheExplorer() {
         </Tabs>
       )}
 
-      <div className="flex justify-center space-x-4">
-        <Button variant="outline" onClick={() => window.history.back()}>
+      <div className="mt-8 flex justify-center space-x-4">
+        <Button variant="outline" onClick={() => window.location.href = "/"}>
           Back to Home
         </Button>
         <Button variant="outline" onClick={() => window.location.href = "/product-keywords"}>

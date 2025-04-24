@@ -791,6 +791,22 @@ function processSearchTerms(data: any[]): ParseResult<Level2SearchTermData> {
         "Top Product 3", "top_product_3", "Top ASIN 3", "top_asin_3"
       ]);
 
+      // Find top clicked products titles
+      const topProduct1Title = findField(item, [
+        "Top_Clicked_Product_1_Title", "top_clicked_product_1_title", "Top Clicked Product 1 Title",
+        "Top Product 1 Title", "top_product_1_title", "Top Title 1", "top_title_1"
+      ]);
+
+      const topProduct2Title = findField(item, [
+        "Top_Clicked_Product_2_Title", "top_clicked_product_2_title", "Top Clicked Product 2 Title",
+        "Top Product 2 Title", "top_product_2_title", "Top Title 2", "top_title_2"
+      ]);
+
+      const topProduct3Title = findField(item, [
+        "Top_Clicked_Product_3_Title", "top_clicked_product_3_title", "Top Clicked Product 3 Title",
+        "Top Product 3 Title", "top_product_3_title", "Top Title 3", "top_title_3"
+      ]);
+
       const processedItem: Level2SearchTermData = {
         Search_Term: searchTermField ? String(searchTermField) : "",
         Volume: volume,
@@ -804,7 +820,10 @@ function processSearchTerms(data: any[]): ParseResult<Level2SearchTermData> {
         Competition: competition,
         Top_Clicked_Product_1_ASIN: topProduct1,
         Top_Clicked_Product_2_ASIN: topProduct2,
-        Top_Clicked_Product_3_ASIN: topProduct3
+        Top_Clicked_Product_3_ASIN: topProduct3,
+        Top_Clicked_Product_1_Title: topProduct1Title ? String(topProduct1Title) : undefined,
+        Top_Clicked_Product_2_Title: topProduct2Title ? String(topProduct2Title) : undefined,
+        Top_Clicked_Product_3_Title: topProduct3Title ? String(topProduct3Title) : undefined
       }
 
       // Skip items without a search term

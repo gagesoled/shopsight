@@ -26,4 +26,11 @@ export interface HierarchicalCluster {
   level: number
   similarity: number
   metadataAnalysis?: MetadataAnalysis
+  // Added properties based on usage
+  metrics?: {
+    opportunityScore?: number
+    totalVolume?: number
+  }
+  description?: string
+  tags?: Array<{ category: string; value: string; confidence?: number }>
 } 

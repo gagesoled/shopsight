@@ -374,17 +374,30 @@ async function analyzeMetadata(
   cluster: HierarchicalCluster,
   openai: OpenAI
 ): Promise<MetadataAnalysis> {
-  const terms = cluster.terms.map((t: EmbeddingResult) => t.term)
-  const metadata = cluster.terms.map((t: EmbeddingResult) => t.metadata || {})
+  const terms = cluster.terms?.map((t: EmbeddingResult) => t.term) ?? [];
+  const metadata = cluster.terms?.map((t: EmbeddingResult) => t.metadata || {}) ?? [];
+
+  // Initialize default empty structures
+  const defaultPatterns = {
+    functionPatterns: [],
+    formatPatterns: [],
+    valuePatterns: []
+  };
+
+  const defaultRelationships = {
+    functionFormatPairs: [],
+    functionValuePairs: [],
+    formatValuePairs: []
+  };
 
   // Extract patterns from metadata
-  const patterns = await extractMetadataPatterns(terms, metadata, openai)
+  const patterns = await extractMetadataPatterns(terms, metadata, openai) || defaultPatterns;
 
   // Analyze relationships between different metadata types
-  const relationships = await analyzeMetadataRelationships(terms, metadata, openai)
+  const relationships = await analyzeMetadataRelationships(terms, metadata, openai) || defaultRelationships;
 
   // Generate insights from patterns and relationships
-  const insights = await generateMetadataInsights(patterns, relationships, terms, openai)
+  const insights = await generateMetadataInsights(patterns, relationships, terms, openai);
 
   return {
     patterns,
@@ -471,8 +484,14 @@ export async function runAIClustering(
               keyTerms: [],
               keyMetrics: [],
               supportingTags: []
-            }
-          } as AICluster
+            },
+            terms: cluster.terms.map(term => ({
+              term: term.term,
+              volume: term.volume,
+              clickShare: (term as unknown as { clickShare?: number }).clickShare || 0,
+              embedding: term.embedding
+            }))
+          } as unknown as AICluster
         } catch (err) {
           console.error('Failed to generate cluster metadata:', err)
           return {
@@ -486,8 +505,14 @@ export async function runAIClustering(
               keyTerms: [],
               keyMetrics: [],
               supportingTags: []
-            }
-          } as AICluster
+            },
+            terms: cluster.terms.map(term => ({
+              term: term.term,
+              volume: term.volume,
+              clickShare: (term as unknown as { clickShare?: number }).clickShare || 0,
+              embedding: term.embedding
+            }))
+          } as unknown as AICluster
         }
       })
     )
@@ -542,9 +567,12 @@ async function clusterEmbeddings(embeddings: EmbeddingResult[]): Promise<Hierarc
   const noiseCluster: EmbeddingResult[] = []
   
   // Process noise points (points not assigned to any cluster)
-  const noise = dbscan.noise
+  const noise = dbscan.noise || []
   noise.forEach((index: number) => {
-    noiseCluster.push(embeddings[index])
+    // Ensure index is valid before accessing embeddings
+    if (index >= 0 && index < embeddings.length) {
+      noiseCluster.push(embeddings[index])
+    }
   })
   
   // Process clusters
@@ -749,9 +777,27 @@ async function analyzeMetadataRelationships(
   metadata: Array<Record<string, any>>,
   openai: OpenAI
 ): Promise<MetadataAnalysis['relationships']> {
-  const functionFormatPairs: MetadataAnalysis['relationships']['functionFormatPairs'] = []
-  const functionValuePairs: MetadataAnalysis['relationships']['functionValuePairs'] = []
-  const formatValuePairs: MetadataAnalysis['relationships']['formatValuePairs'] = []
+  // Define typed arrays for our collections
+  const functionFormatPairs: Array<{
+    function: string;
+    format: string;
+    confidence: number;
+    terms: string[];
+  }> = []
+  
+  const functionValuePairs: Array<{
+    function: string;
+    value: string;
+    confidence: number;
+    terms: string[];
+  }> = []
+  
+  const formatValuePairs: Array<{
+    format: string;
+    value: string;
+    confidence: number;
+    terms: string[];
+  }> = []
 
   // Group terms by metadata combinations
   const functionFormatGroups = new Map<string, string[]>()
@@ -821,58 +867,63 @@ async function analyzeMetadataRelationships(
 }
 
 async function generateMetadataInsights(
-  patterns: NonNullable<MetadataAnalysis['patterns']>,
-  relationships: NonNullable<MetadataAnalysis['relationships']>,
+  patterns: NonNullable<MetadataAnalysis['patterns']>, 
+  relationships: NonNullable<MetadataAnalysis['relationships']>, 
   terms: string[],
   openai: OpenAI
-): Promise<MetadataAnalysis['insights']> {
-  const insights: NonNullable<MetadataAnalysis['insights']> = []
+): Promise<NonNullable<MetadataAnalysis['insights']>> {
+  const insights: Array<{
+    type: string;
+    description: string;
+    confidence: number;
+    supportingTerms: string[];
+  }> = [];
 
   // Generate insights from patterns
-  if (patterns.functionPatterns && patterns.functionPatterns.length > 0) {
+  if (patterns?.functionPatterns?.length) {
     for (const pattern of patterns.functionPatterns) {
-      const insight = await generateInsight(pattern, 'function', openai)
-      insights.push(insight)
+      const insight = await generateInsight(pattern, 'function', openai);
+      insights.push(insight);
     }
   }
 
-  if (patterns.formatPatterns && patterns.formatPatterns.length > 0) {
+  if (patterns?.formatPatterns?.length) {
     for (const pattern of patterns.formatPatterns) {
-      const insight = await generateInsight(pattern, 'format', openai)
-      insights.push(insight)
+      const insight = await generateInsight(pattern, 'format', openai);
+      insights.push(insight);
     }
   }
 
-  if (patterns.valuePatterns && patterns.valuePatterns.length > 0) {
+  if (patterns?.valuePatterns?.length) {
     for (const pattern of patterns.valuePatterns) {
-      const insight = await generateInsight(pattern, 'value', openai)
-      insights.push(insight)
+      const insight = await generateInsight(pattern, 'value', openai);
+      insights.push(insight);
     }
   }
 
   // Generate insights from relationships
-  if (relationships.functionFormatPairs && relationships.functionFormatPairs.length > 0) {
+  if (relationships && 'functionFormatPairs' in relationships && relationships.functionFormatPairs?.length) {
     for (const relationship of relationships.functionFormatPairs) {
-      const insight = await generateRelationshipInsight(relationship, 'functionFormat', openai)
-      insights.push(insight)
+      const insight = await generateRelationshipInsight(relationship, 'functionFormat', openai);
+      insights.push(insight);
     }
   }
 
-  if (relationships.functionValuePairs && relationships.functionValuePairs.length > 0) {
+  if (relationships && 'functionValuePairs' in relationships && relationships.functionValuePairs?.length) {
     for (const relationship of relationships.functionValuePairs) {
-      const insight = await generateRelationshipInsight(relationship, 'functionValue', openai)
-      insights.push(insight)
+      const insight = await generateRelationshipInsight(relationship, 'functionValue', openai);
+      insights.push(insight);
     }
   }
 
-  if (relationships.formatValuePairs && relationships.formatValuePairs.length > 0) {
+  if (relationships && 'formatValuePairs' in relationships && relationships.formatValuePairs?.length) {
     for (const relationship of relationships.formatValuePairs) {
-      const insight = await generateRelationshipInsight(relationship, 'formatValue', openai)
-      insights.push(insight)
+      const insight = await generateRelationshipInsight(relationship, 'formatValue', openai);
+      insights.push(insight);
     }
   }
 
-  return insights
+  return insights;
 }
 
 async function analyzePattern(
@@ -945,7 +996,12 @@ async function generateInsight(
   pattern: { pattern: string; confidence: number; terms: string[] },
   type: 'function' | 'format' | 'value',
   openai: OpenAI
-): Promise<MetadataAnalysis['insights'][0]> {
+): Promise<{
+  type: string;
+  description: string;
+  confidence: number;
+  supportingTerms: string[];
+}> {
   const prompt = `Based on this ${type} pattern: "${pattern.pattern}", generate a business insight. 
   Consider the following terms: ${pattern.terms.join(', ')}. 
   Format your response as JSON:
@@ -971,8 +1027,8 @@ async function generateInsight(
     const result = JSON.parse(responseContent)
     return {
       type,
-      description: result.description,
-      confidence: result.confidence * pattern.confidence,
+      description: result.description || "No insight generated",
+      confidence: result.confidence * (pattern.confidence || 0),
       supportingTerms: pattern.terms
     }
   } catch (error) {
@@ -990,7 +1046,12 @@ async function generateRelationshipInsight(
   relationship: { confidence: number; terms: string[] },
   type: 'functionFormat' | 'functionValue' | 'formatValue',
   openai: OpenAI
-): Promise<MetadataAnalysis['insights'][0]> {
+): Promise<{
+  type: string;
+  description: string;
+  confidence: number;
+  supportingTerms: string[];
+}> {
   const prompt = `Based on this ${type} relationship, generate a business insight. 
   Consider the following terms: ${relationship.terms.join(', ')}. 
   Format your response as JSON:
@@ -1016,8 +1077,8 @@ async function generateRelationshipInsight(
     const result = JSON.parse(responseContent)
     return {
       type: 'relationship',
-      description: result.description,
-      confidence: result.confidence * relationship.confidence,
+      description: result.description || "No insight generated",
+      confidence: result.confidence * (relationship.confidence || 0),
       supportingTerms: relationship.terms
     }
   } catch (error) {
@@ -1475,7 +1536,12 @@ function createCluster(terms: EmbeddingResult[], id: string, parentId?: string):
     parentId,
     level: 0,
     similarity: 0,
-    metadataAnalysis: generateClusterMetadata(terms)
+    metadataAnalysis: {
+      volume: terms.reduce((sum, t) => sum + t.volume, 0),
+      growth: terms.reduce((sum, t) => sum + (t.growth || 0), 0) / terms.length,
+      competition: terms.reduce((sum, t) => sum + (t.competition || 0), 0) / terms.length,
+      terms: terms.map(t => t.term)
+    }
   }
 }
 
