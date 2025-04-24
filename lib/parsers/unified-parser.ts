@@ -269,9 +269,72 @@ export function parseCSV(csvText: string): { headers: string[]; rows: any[]; hea
   const { headerRowIndex, headers: rawHeaders } = findHeaderRow(lines.slice(dataStartIndex))
   const actualHeaderRowIndex = headerRowIndex + dataStartIndex;
 
-  // Normalize the headers
-  const headers = normalizeHeaders(rawHeaders)
-  console.log("Normalized headers:", headers)
+  // Handle duplicate headers and special cases before normalization
+  let processedHeaders = [...rawHeaders];
+  
+  // Check for duplicate search_volume_growth or growth columns
+  const growthIndices = processedHeaders.reduce((acc, header, index) => {
+    const lowerHeader = header.toLowerCase();
+    if (lowerHeader.includes('growth') && (lowerHeader.includes('90') || lowerHeader.includes('180') || 
+        lowerHeader.includes('three month') || lowerHeader.includes('six month'))) {
+      acc.push({index, header, value: lowerHeader});
+    }
+    return acc;
+  }, [] as {index: number, header: string, value: string}[]);
+  
+  // If we found multiple growth columns, specifically name them
+  if (growthIndices.length >= 2) {
+    growthIndices.forEach(({index, header, value}) => {
+      // Determine if this is 90-day or 180-day growth
+      if (value.includes('90') || value.includes('three month')) {
+        processedHeaders[index] = 'Growth_90';
+      } else if (value.includes('180') || value.includes('six month')) {
+        processedHeaders[index] = 'Growth_180';
+      }
+    });
+  }
+  
+  // Handle product columns
+  const productIndices = processedHeaders.reduce((acc, header, index) => {
+    const lowerHeader = header.toLowerCase();
+    if (lowerHeader.includes('product') || lowerHeader.includes('asin')) {
+      acc.push({index, header, value: lowerHeader});
+    }
+    return acc;
+  }, [] as {index: number, header: string, value: string}[]);
+  
+  // Group product columns
+  if (productIndices.length > 0) {
+    // Find patterns to determine if a column is a title or ASIN
+    productIndices.forEach(({index, header, value}) => {
+      if (value.includes('title')) {
+        // This is definitely a title column
+        const productNum = value.includes('1') ? '1' : value.includes('2') ? '2' : value.includes('3') ? '3' : '';
+        if (productNum) {
+          processedHeaders[index] = `Top_Clicked_Product_${productNum}_Title`;
+        }
+      } else if (value.includes('asin')) {
+        // This is definitely an ASIN column
+        const productNum = value.includes('1') ? '1' : value.includes('2') ? '2' : value.includes('3') ? '3' : '';
+        if (productNum) {
+          processedHeaders[index] = `Top_Clicked_Product_${productNum}_ASIN`;
+        }
+      } else {
+        // Need to determine based on position if this is missing explicit title/asin
+        // For now, assume Title if it's not explicitly marked
+        const productNum = value.includes('1') ? '1' : value.includes('2') ? '2' : value.includes('3') ? '3' : '';
+        if (productNum) {
+          processedHeaders[index] = `Top_Clicked_Product_${productNum}_Title`;
+        }
+      }
+    });
+  }
+
+  // Normalize the headers after our preprocessing
+  const headers = normalizeHeaders(processedHeaders, 'Level2SearchTerms');
+  console.log("Original headers:", rawHeaders);
+  console.log("Processed headers:", processedHeaders);
+  console.log("Normalized headers:", headers);
 
   // Parse data rows
   const rows = []
@@ -693,8 +756,9 @@ function processSearchTerms(data: any[]): ParseResult<Level2SearchTermData> {
 
   for (const item of data) {
     try {
-      // Debug raw values
+      // Debug raw values - important for troubleshooting
       console.log("Processing search term row:", item)
+      console.log("Available keys:", Object.keys(item))
 
       // Find search term using possible field names
       const searchTermField = findField(item, [
@@ -721,20 +785,34 @@ function processSearchTerms(data: any[]): ParseResult<Level2SearchTermData> {
         if (isNaN(volume)) volume = 0;
       }
 
-      // Find growth data - both 90 day and 180 day
+      // Find growth data - expanded lookup to catch more variations
       const growth90Raw = findField(item, [
-        "Growth_90", "growth_90", "Growth (90d)", "Search Volume Growth (90d)", 
-        "search_volume_growth_90d", "growth_90d", "90 Day Growth", "90d_growth",
-        "Three Month Growth", "three_month_growth"
+        "Growth_90", "Growth90", "growth_90", "Growth (90d)", "growth_90d", "growth_90D",
+        "Growth (90 Days)", "Growth (90 days)", "90d Growth", "90-day Growth", "growth (90d)",
+        "search_volume_growth_90d", "90 Day Growth", "90d_growth", "90d growth",
+        "Three Month Growth", "three_month_growth", "Three month growth", 
+        "Growth 90", "growth 90", "90d", "90D", "90 day", "90 days", "growth90", "growth90d"
       ]);
-      const growth90 = parseNumberValue(growth90Raw);
-
+      
       const growth180Raw = findField(item, [
-        "Growth_180", "growth_180", "Growth (180d)", "Search Volume Growth (180d)", 
-        "search_volume_growth_180d", "growth_180d", "180 Day Growth", "180d_growth",
-        "Six Month Growth", "six_month_growth"
+        "Growth_180", "Growth180", "growth_180", "Growth (180d)", "growth_180d", "growth_180D",
+        "Growth (180 Days)", "Growth (180 days)", "180d Growth", "180-day Growth", "growth (180d)",
+        "search_volume_growth_180d", "180 Day Growth", "180d_growth", "180d growth",
+        "Six Month Growth", "six_month_growth", "Six month growth",
+        "Growth 180", "growth 180", "180d", "180D", "180 day", "180 days", "growth180", "growth180d"
       ]);
+      
+      // Log raw growth values for debugging
+      console.log("Growth 90 Raw Value:", growth90Raw);
+      console.log("Growth 180 Raw Value:", growth180Raw);
+      
+      // Parse them to numbers
+      const growth90 = parseNumberValue(growth90Raw);
       const growth180 = parseNumberValue(growth180Raw);
+      
+      // Log the parsed numeric growth values
+      console.log("Growth 90 Parsed Value:", growth90);
+      console.log("Growth 180 Parsed Value:", growth180);
 
       // Find click share
       const clickShareRaw = findField(item, [
@@ -746,7 +824,7 @@ function processSearchTerms(data: any[]): ParseResult<Level2SearchTermData> {
       // Find conversion rate
       const conversionRateRaw = findField(item, [
         "Conversion_Rate", "conversion_rate", "Conversion Rate", "ConversionRate", 
-        "Conversion", "conversion", "CVR", "cvr"
+        "Conversion", "conversion", "CVR", "cvr", "search_conversion_rate"
       ]);
       const conversionRate = parseNumberValue(conversionRateRaw);
 
@@ -775,37 +853,55 @@ function processSearchTerms(data: any[]): ParseResult<Level2SearchTermData> {
       ]);
       const competition = parseNumberValue(competitionRaw);
 
-      // Find top clicked products
-      const topProduct1 = findField(item, [
-        "Top_Clicked_Product_1_ASIN", "top_clicked_product_1_asin", "Top Clicked Product 1",
-        "Top Product 1", "top_product_1", "Top ASIN 1", "top_asin_1"
+      // More robust product field detection - try both title and non-title variations
+      // Find top clicked products ASINs
+      const topProduct1ASIN = findField(item, [
+        "Top_Clicked_Product_1_ASIN", "top_clicked_product_1_asin", "Top Clicked Product 1 ASIN",
+        "Top Product 1 ASIN", "top_product_1_asin", "Top ASIN 1", "top_asin_1",
+        "Product 1 ASIN", "product_1_asin", "ASIN 1", "asin_1", "Product1ASIN"
       ]);
 
-      const topProduct2 = findField(item, [
-        "Top_Clicked_Product_2_ASIN", "top_clicked_product_2_asin", "Top Clicked Product 2",
-        "Top Product 2", "top_product_2", "Top ASIN 2", "top_asin_2"
+      const topProduct2ASIN = findField(item, [
+        "Top_Clicked_Product_2_ASIN", "top_clicked_product_2_asin", "Top Clicked Product 2 ASIN",
+        "Top Product 2 ASIN", "top_product_2_asin", "Top ASIN 2", "top_asin_2",
+        "Product 2 ASIN", "product_2_asin", "ASIN 2", "asin_2", "Product2ASIN"
       ]);
 
-      const topProduct3 = findField(item, [
-        "Top_Clicked_Product_3_ASIN", "top_clicked_product_3_asin", "Top Clicked Product 3",
-        "Top Product 3", "top_product_3", "Top ASIN 3", "top_asin_3"
+      const topProduct3ASIN = findField(item, [
+        "Top_Clicked_Product_3_ASIN", "top_clicked_product_3_asin", "Top Clicked Product 3 ASIN",
+        "Top Product 3 ASIN", "top_product_3_asin", "Top ASIN 3", "top_asin_3",
+        "Product 3 ASIN", "product_3_asin", "ASIN 3", "asin_3", "Product3ASIN"
       ]);
 
-      // Find top clicked products titles
+      // Find top clicked products titles with more variations
       const topProduct1Title = findField(item, [
-        "Top_Clicked_Product_1_Title", "top_clicked_product_1_title", "Top Clicked Product 1 Title",
-        "Top Product 1 Title", "top_product_1_title", "Top Title 1", "top_title_1"
+        "Top_Clicked_Product_1_Title", "top_clicked_product_1_title", "Top_Clicked_Product_1",
+        "top_clicked_product_1", "Top Clicked Product 1 Title", "Top Clicked Product 1",
+        "Top Product 1 Title", "top_product_1_title", "Top Title 1", "top_title_1",
+        "Product 1 Title", "product_1_title", "Title 1", "title_1", "Product1Title",
+        "Product 1", "product_1", "Product1", "Top1"
       ]);
 
       const topProduct2Title = findField(item, [
-        "Top_Clicked_Product_2_Title", "top_clicked_product_2_title", "Top Clicked Product 2 Title",
-        "Top Product 2 Title", "top_product_2_title", "Top Title 2", "top_title_2"
+        "Top_Clicked_Product_2_Title", "top_clicked_product_2_title", "Top_Clicked_Product_2",
+        "top_clicked_product_2", "Top Clicked Product 2 Title", "Top Clicked Product 2",
+        "Top Product 2 Title", "top_product_2_title", "Top Title 2", "top_title_2",
+        "Product 2 Title", "product_2_title", "Title 2", "title_2", "Product2Title",
+        "Product 2", "product_2", "Product2", "Top2"
       ]);
 
       const topProduct3Title = findField(item, [
-        "Top_Clicked_Product_3_Title", "top_clicked_product_3_title", "Top Clicked Product 3 Title",
-        "Top Product 3 Title", "top_product_3_title", "Top Title 3", "top_title_3"
+        "Top_Clicked_Product_3_Title", "top_clicked_product_3_title", "Top_Clicked_Product_3",
+        "top_clicked_product_3", "Top Clicked Product 3 Title", "Top Clicked Product 3",
+        "Top Product 3 Title", "top_product_3_title", "Top Title 3", "top_title_3",
+        "Product 3 Title", "product_3_title", "Title 3", "title_3", "Product3Title",
+        "Product 3", "product_3", "Product3", "Top3"
       ]);
+      
+      // Log found product fields for debugging
+      console.log("Top Product 1 Title:", topProduct1Title);
+      console.log("Top Product 2 Title:", topProduct2Title);
+      console.log("Top Product 3 Title:", topProduct3Title);
 
       const processedItem: Level2SearchTermData = {
         Search_Term: searchTermField ? String(searchTermField) : "",
@@ -818,9 +914,9 @@ function processSearchTerms(data: any[]): ParseResult<Level2SearchTermData> {
         Function_Inferred: functionField,
         Values_Inferred: valuesField,
         Competition: competition,
-        Top_Clicked_Product_1_ASIN: topProduct1,
-        Top_Clicked_Product_2_ASIN: topProduct2,
-        Top_Clicked_Product_3_ASIN: topProduct3,
+        Top_Clicked_Product_1_ASIN: topProduct1ASIN,
+        Top_Clicked_Product_2_ASIN: topProduct2ASIN,
+        Top_Clicked_Product_3_ASIN: topProduct3ASIN,
         Top_Clicked_Product_1_Title: topProduct1Title ? String(topProduct1Title) : undefined,
         Top_Clicked_Product_2_Title: topProduct2Title ? String(topProduct2Title) : undefined,
         Top_Clicked_Product_3_Title: topProduct3Title ? String(topProduct3Title) : undefined
@@ -863,23 +959,145 @@ function processNicheInsights(rows: any[]): ParseResult<Level2NicheInsightData> 
 
   // Helper function to find a field with multiple possible names
   function findField(row: any, possibleNames: string[]): string | undefined {
-    // Case sensitive match first
+    // Direct exact match first (fastest path)
     for (const name of possibleNames) {
       if (row[name] !== undefined) {
         return row[name]
       }
     }
     
-    // Case insensitive match as fallback
-    const rowKeys = Object.keys(row)
-    for (const name of possibleNames) {
-      const key = rowKeys.find(k => k.toLowerCase() === name.toLowerCase())
-      if (key && row[key] !== undefined) {
-        return row[key]
+    // Pascal case and snake case variations
+    const variations: string[] = [];
+    possibleNames.forEach(name => {
+      // Add original name
+      variations.push(name);
+      
+      // Add snake_case variation
+      if (!name.includes('_')) {
+        variations.push(name.replace(/([A-Z])/g, '_$1').toLowerCase());
+      }
+      
+      // Add camelCase variation
+      if (name.includes('_')) {
+        variations.push(name.replace(/_([a-z])/g, (_, p1) => p1.toUpperCase()));
+      }
+      
+      // Add PascalCase variation
+      if (name.includes('_')) {
+        const pascalCase = name.split('_').map(part => 
+          part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
+        ).join('');
+        variations.push(pascalCase);
+      }
+      
+      // Add lowercase variation
+      variations.push(name.toLowerCase());
+      
+      // Add uppercase variation
+      variations.push(name.toUpperCase());
+    });
+    
+    // Try all variations with exact match
+    for (const variation of variations) {
+      if (row[variation] !== undefined) {
+        return row[variation];
       }
     }
     
-    return undefined
+    // Special handling for fields with known patterns
+    const rowKeys = Object.keys(row);
+    
+    // 1. Growth field pattern matching
+    if (possibleNames.some(name => name.includes('Growth_90') || name.includes('growth_90'))) {
+      const growth90Pattern = rowKeys.find(key => {
+        const lowerKey = key.toLowerCase();
+        return (lowerKey.includes('growth') && (lowerKey.includes('90') || lowerKey.includes('three') || lowerKey.includes('3m')));
+      });
+      
+      if (growth90Pattern && row[growth90Pattern] !== undefined) {
+        return row[growth90Pattern];
+      }
+    }
+    
+    if (possibleNames.some(name => name.includes('Growth_180') || name.includes('growth_180'))) {
+      const growth180Pattern = rowKeys.find(key => {
+        const lowerKey = key.toLowerCase();
+        return (lowerKey.includes('growth') && (lowerKey.includes('180') || lowerKey.includes('six') || lowerKey.includes('6m')));
+      });
+      
+      if (growth180Pattern && row[growth180Pattern] !== undefined) {
+        return row[growth180Pattern];
+      }
+    }
+    
+    // 2. Product field pattern matching
+    for (const num of ['1', '2', '3']) {
+      if (possibleNames.some(name => name.includes(`Product_${num}`) || name.includes(`product_${num}`))) {
+        // Look for any field containing this product number and the context (title or asin)
+        const isTitle = possibleNames.some(name => name.includes('Title') || name.includes('title'));
+        const isASIN = possibleNames.some(name => name.includes('ASIN') || name.includes('asin'));
+        
+        if (isTitle) {
+          const titlePattern = rowKeys.find(key => {
+            const lowerKey = key.toLowerCase();
+            return lowerKey.includes(num) && 
+              (lowerKey.includes('product') || lowerKey.includes('item')) && 
+              !lowerKey.includes('asin');
+          });
+          
+          if (titlePattern && row[titlePattern] !== undefined) {
+            return row[titlePattern];
+          }
+        }
+        
+        if (isASIN) {
+          const asinPattern = rowKeys.find(key => {
+            const lowerKey = key.toLowerCase();
+            return lowerKey.includes(num) && 
+              (lowerKey.includes('asin') || (lowerKey.includes('product') && lowerKey.includes('id')));
+          });
+          
+          if (asinPattern && row[asinPattern] !== undefined) {
+            return row[asinPattern];
+          }
+        }
+      }
+    }
+    
+    // 3. Partial case-insensitive matching as last resort
+    const lowerCaseFieldNames = possibleNames.map(name => name.toLowerCase());
+    
+    for (const key of rowKeys) {
+      const lowerKey = key.toLowerCase();
+      for (let i = 0; i < lowerCaseFieldNames.length; i++) {
+        const fieldName = lowerCaseFieldNames[i];
+        // Match if the key includes the field name or vice versa
+        if (lowerKey.includes(fieldName) || fieldName.includes(lowerKey)) {
+          return row[key];
+        }
+      }
+    }
+    
+    // 4. Super fuzzy matching - try to find anything with similar words
+    const fieldNameWords = possibleNames.flatMap(name => 
+      name.toLowerCase().split(/[_\s]/).filter(word => word.length > 3)
+    );
+    
+    if (fieldNameWords.length > 0) {
+      for (const key of rowKeys) {
+        const keyWords = key.toLowerCase().split(/[_\s]/);
+        const matchesAnyWord = fieldNameWords.some(word => 
+          keyWords.some(keyWord => keyWord.includes(word) || word.includes(keyWord))
+        );
+        
+        if (matchesAnyWord) {
+          return row[key];
+        }
+      }
+    }
+    
+    // Nothing found
+    return undefined;
   }
 
   // Debug raw data
@@ -1046,24 +1264,144 @@ function processProducts(data: any[]): ParseResult<Level2ProductData> {
  * Helper function to find a field value from an object using various possible field names
  */
 function findField(item: any, possibleFieldNames: string[]): any {
+  // Direct exact match first (fastest path)
   for (const fieldName of possibleFieldNames) {
     if (item[fieldName] !== undefined) {
       return item[fieldName];
     }
   }
   
-  // Try case-insensitive matching as a fallback
-  const lowerCaseFieldNames = possibleFieldNames.map(name => name.toLowerCase());
-  const itemKeys = Object.keys(item);
+  // Pascal case and snake case variations
+  const variations: string[] = [];
+  possibleFieldNames.forEach(name => {
+    // Add original name
+    variations.push(name);
+    
+    // Add snake_case variation
+    if (!name.includes('_')) {
+      variations.push(name.replace(/([A-Z])/g, '_$1').toLowerCase());
+    }
+    
+    // Add camelCase variation
+    if (name.includes('_')) {
+      variations.push(name.replace(/_([a-z])/g, (_, p1) => p1.toUpperCase()));
+    }
+    
+    // Add PascalCase variation
+    if (name.includes('_')) {
+      const pascalCase = name.split('_').map(part => 
+        part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
+      ).join('');
+      variations.push(pascalCase);
+    }
+    
+    // Add lowercase variation
+    variations.push(name.toLowerCase());
+    
+    // Add uppercase variation
+    variations.push(name.toUpperCase());
+  });
   
-  for (const key of itemKeys) {
-    const lowerKey = key.toLowerCase();
-    const matchIndex = lowerCaseFieldNames.findIndex(name => lowerKey.includes(name));
-    if (matchIndex >= 0) {
-      return item[key];
+  // Try all variations with exact match
+  for (const variation of variations) {
+    if (item[variation] !== undefined) {
+      return item[variation];
     }
   }
   
+  // Special handling for fields with known patterns
+  const itemKeys = Object.keys(item);
+  
+  // 1. Growth field pattern matching
+  if (possibleFieldNames.some(name => name.includes('Growth_90') || name.includes('growth_90'))) {
+    const growth90Pattern = itemKeys.find(key => {
+      const lowerKey = key.toLowerCase();
+      return (lowerKey.includes('growth') && (lowerKey.includes('90') || lowerKey.includes('three') || lowerKey.includes('3m')));
+    });
+    
+    if (growth90Pattern && item[growth90Pattern] !== undefined) {
+      return item[growth90Pattern];
+    }
+  }
+  
+  if (possibleFieldNames.some(name => name.includes('Growth_180') || name.includes('growth_180'))) {
+    const growth180Pattern = itemKeys.find(key => {
+      const lowerKey = key.toLowerCase();
+      return (lowerKey.includes('growth') && (lowerKey.includes('180') || lowerKey.includes('six') || lowerKey.includes('6m')));
+    });
+    
+    if (growth180Pattern && item[growth180Pattern] !== undefined) {
+      return item[growth180Pattern];
+    }
+  }
+  
+  // 2. Product field pattern matching
+  for (const num of ['1', '2', '3']) {
+    if (possibleFieldNames.some(name => name.includes(`Product_${num}`) || name.includes(`product_${num}`))) {
+      // Look for any field containing this product number and the context (title or asin)
+      const isTitle = possibleFieldNames.some(name => name.includes('Title') || name.includes('title'));
+      const isASIN = possibleFieldNames.some(name => name.includes('ASIN') || name.includes('asin'));
+      
+      if (isTitle) {
+        const titlePattern = itemKeys.find(key => {
+          const lowerKey = key.toLowerCase();
+          return lowerKey.includes(num) && 
+            (lowerKey.includes('product') || lowerKey.includes('item')) && 
+            !lowerKey.includes('asin');
+        });
+        
+        if (titlePattern && item[titlePattern] !== undefined) {
+          return item[titlePattern];
+        }
+      }
+      
+      if (isASIN) {
+        const asinPattern = itemKeys.find(key => {
+          const lowerKey = key.toLowerCase();
+          return lowerKey.includes(num) && 
+            (lowerKey.includes('asin') || (lowerKey.includes('product') && lowerKey.includes('id')));
+        });
+        
+        if (asinPattern && item[asinPattern] !== undefined) {
+          return item[asinPattern];
+        }
+      }
+    }
+  }
+  
+  // 3. Partial case-insensitive matching as last resort
+  const lowerCaseFieldNames = possibleFieldNames.map(name => name.toLowerCase());
+  
+  for (const key of itemKeys) {
+    const lowerKey = key.toLowerCase();
+    for (let i = 0; i < lowerCaseFieldNames.length; i++) {
+      const fieldName = lowerCaseFieldNames[i];
+      // Match if the key includes the field name or vice versa
+      if (lowerKey.includes(fieldName) || fieldName.includes(lowerKey)) {
+        return item[key];
+      }
+    }
+  }
+  
+  // 4. Super fuzzy matching - try to find anything with similar words
+  const fieldNameWords = possibleFieldNames.flatMap(name => 
+    name.toLowerCase().split(/[_\s]/).filter(word => word.length > 3)
+  );
+  
+  if (fieldNameWords.length > 0) {
+    for (const key of itemKeys) {
+      const keyWords = key.toLowerCase().split(/[_\s]/);
+      const matchesAnyWord = fieldNameWords.some(word => 
+        keyWords.some(keyWord => keyWord.includes(word) || word.includes(keyWord))
+      );
+      
+      if (matchesAnyWord) {
+        return item[key];
+      }
+    }
+  }
+  
+  // Nothing found
   return undefined;
 }
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Upload } from "@/components/upload"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -71,16 +71,45 @@ interface Level2UploadResponseData {
 }
 
 export default function NicheExplorer() {
-  const [selectedNiche, setSelectedNiche] = useState<string | null>(null)
-  const [clusters, setClusters] = useState<Cluster[]>([])
-  const [searchTerms, setSearchTerms] = useState<SearchTerm[]>([])
-  const [nicheInsights, setNicheInsights] = useState<NicheInsight[]>([])
-  const [products, setProducts] = useState<Product[]>([])
+  const [selectedNiche, setSelectedNiche] = useState(null as string | null)
+  const [clusters, setClusters] = useState([] as Cluster[])
+  const [searchTerms, setSearchTerms] = useState([] as SearchTerm[])
+  const [nicheInsights, setNicheInsights] = useState([] as NicheInsight[])
+  const [products, setProducts] = useState([] as Product[])
   const [summary, setSummary] = useState<string>("")
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false)
   const [summaryError, setSummaryError] = useState<string | null>(null)
   const [level2Loaded, setLevel2Loaded] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null)
+  // Sorting configuration for quantitative columns (any type to avoid TSX parsing issues)
+  const [sortConfig, setSortConfig] = useState(null as any)
+
+  // Compute sorted search terms based on sortConfig
+  const sortedSearchTerms = useMemo(() => {
+    if (!sortConfig) return searchTerms
+    const { key, direction } = sortConfig
+    return [...searchTerms].sort((a, b) => {
+      const aVal = (a as any)[key] ?? 0
+      const bVal = (b as any)[key] ?? 0
+      // String comparison for text
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
+        return direction === 'asc'
+          ? aVal.localeCompare(bVal)
+          : bVal.localeCompare(aVal)
+      }
+      // Numeric comparison
+      return direction === 'asc' ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number)
+    })
+  }, [searchTerms, sortConfig])
+
+  // Handle sorting when header clicked, key is string
+  const handleSort = (key: string) => {
+    setSortConfig(prev =>
+      prev && prev.key === key
+        ? { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+        : { key, direction: 'asc' }
+    )
+  }
 
   // Helper function to format percentage values
   const formatPercentage = (value: number | undefined | null): string => {
@@ -278,18 +307,48 @@ export default function NicheExplorer() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Search Term</TableHead>
-                          <TableHead className="text-right">Volume</TableHead>
-                          <TableHead className="text-right">Growth (90d)</TableHead>
-                          <TableHead className="text-right">Growth (180d)</TableHead>
-                          <TableHead className="text-right">Click Share</TableHead>
-                          <TableHead className="text-right">Conversion Rate</TableHead>
+                          <TableHead
+                            className="text-right cursor-pointer"
+                            onClick={() => handleSort("Volume")}
+                          >
+                            Volume
+                            {sortConfig?.key === "Volume" ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </TableHead>
+                          <TableHead
+                            className="text-right cursor-pointer"
+                            onClick={() => handleSort("Growth_90")}
+                          >
+                            Growth (90d)
+                            {sortConfig?.key === "Growth_90" ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </TableHead>
+                          <TableHead
+                            className="text-right cursor-pointer"
+                            onClick={() => handleSort("Growth_180")}
+                          >
+                            Growth (180d)
+                            {sortConfig?.key === "Growth_180" ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </TableHead>
+                          <TableHead
+                            className="text-right cursor-pointer"
+                            onClick={() => handleSort("Click_Share")}
+                          >
+                            Click Share
+                            {sortConfig?.key === "Click_Share" ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </TableHead>
+                          <TableHead
+                            className="text-right cursor-pointer"
+                            onClick={() => handleSort("Conversion_Rate")}
+                          >
+                            Conversion Rate
+                            {sortConfig?.key === "Conversion_Rate" ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </TableHead>
                           <TableHead>Top Product 1</TableHead>
                           <TableHead>Top Product 2</TableHead>
                           <TableHead>Top Product 3</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {searchTerms.map((term, index) => (
+                        {sortedSearchTerms.map((term, index) => (
                           <TableRow key={index}>
                             <TableCell className="font-medium">{term.Search_Term}</TableCell>
                             <TableCell className="text-right">{term.Volume?.toLocaleString() ?? 'N/A'}</TableCell>

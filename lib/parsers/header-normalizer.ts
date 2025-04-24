@@ -45,21 +45,23 @@ const HEADER_MAPPINGS: Record<string, Record<string, string>> = {
   'Level2SearchTerms': {
     'Search Term': 'search_term',
     'Search Volume': 'search_volume',
-    'Search Volume Growth (90d)': 'search_volume_growth_90d',
-    'Search Volume Growth (180d)': 'search_volume_growth_180d',
-    'Growth (90d)': 'search_volume_growth_90d',
-    'Growth (180d)': 'search_volume_growth_180d',
+    'Search Volume Growth (90d)': 'Growth_90',
+    'Search Volume Growth (180d)': 'Growth_180',
+    'Growth (90d)': 'Growth_90',
+    'Growth (180d)': 'Growth_180',
     'Click Share': 'click_share',
     'Search Conversion Rate': 'search_conversion_rate',
     'Conversion Rate': 'search_conversion_rate',
-    'Top Clicked Product 1 (Title)': 'top_clicked_product_1_title',
-    'Top Clicked Product 1 (ASIN)': 'top_clicked_product_1_asin',
-    'Top Clicked Product 2 (Title)': 'top_clicked_product_2_title', 
-    'Top Clicked Product 2 (ASIN)': 'top_clicked_product_2_asin',
-    'Top Clicked Product 3 (Title)': 'top_clicked_product_3_title',
-    'Top Clicked Product 3 (ASIN)': 'top_clicked_product_3_asin',
-    'Format': 'format_inferred',
-    'Function': 'function_inferred',
+    'Top Clicked Product 1 (Title)': 'Top_Clicked_Product_1_Title',
+    'Top Clicked Product 1 (ASIN)': 'Top_Clicked_Product_1_ASIN',
+    'Top Clicked Product 2 (Title)': 'Top_Clicked_Product_2_Title', 
+    'Top Clicked Product 2 (ASIN)': 'Top_Clicked_Product_2_ASIN',
+    'Top Clicked Product 3 (Title)': 'Top_Clicked_Product_3_Title',
+    'Top Clicked Product 3 (ASIN)': 'Top_Clicked_Product_3_ASIN',
+    'Format': 'Format_Inferred',
+    'Function': 'Function_Inferred',
+    'Values': 'Values_Inferred',
+    'Competition': 'Competition',
   },
 
   // Level 2 Products mappings
@@ -126,48 +128,68 @@ function cleanHeaderText(header: string): string {
  * @returns Normalized header string
  */
 export function normalizeHeader(header: string, dataLevel?: keyof typeof HEADER_MAPPINGS): string {
+  const originalTrimmedHeader = header.trim(); // Use trimmed original for mapping keys
+
   // If dataLevel is provided and exists in HEADER_MAPPINGS, use those mappings
   if (dataLevel && HEADER_MAPPINGS[dataLevel]) {
     const levelMappings = HEADER_MAPPINGS[dataLevel];
-    const cleanedHeader = cleanHeaderText(header);
+    // Try direct match first
+    if (levelMappings[originalTrimmedHeader]) {
+        return levelMappings[originalTrimmedHeader];
+    }
+    // Try cleaned header match
+    const cleanedHeader = cleanHeaderText(originalTrimmedHeader);
     if (levelMappings[cleanedHeader]) {
       return levelMappings[cleanedHeader];
     }
   }
 
-  // Remove any content in parentheses
-  let normalized = header.replace(/\([^)]*\)/g, '')
-  
+  // Default normalization if no specific mapping found
+  // Remove any content in parentheses first
+  let normalized = originalTrimmedHeader.replace(/\([^)]*\)/g, '');
+
   // Convert to lowercase and trim
-  normalized = normalized.toLowerCase().trim()
+  normalized = normalized.toLowerCase().trim();
   
   // Handle specific cases for Level 2 search terms
   if (normalized.includes('180') && normalized.includes('growth')) {
-    return 'search_volume_growth_180d'
+    return 'Growth_180';
   }
   if (normalized.includes('90') && normalized.includes('growth')) {
-    return 'search_volume_growth_90d'
+    return 'Growth_90';
   }
   
-  // Map common variations
-  const headerMappings: Record<string, string> = {
-    'search term': 'search_term',
-    'search volume': 'search_volume',
-    'volume': 'search_volume',
-    'click share': 'click_share',
-    'conversion rate': 'search_conversion_rate',
-    'format': 'format_inferred',
-    'function': 'function_inferred',
-    'values': 'values_inferred',
-    'competition': 'competition',
-    'top clicked product 1 asin': 'top_clicked_product_1_asin',
-    'top clicked product 2 asin': 'top_clicked_product_2_asin',
-    'top clicked product 3 asin': 'top_clicked_product_3_asin'
+  // Replace non-alphanumeric characters (except underscore) with underscore
+  normalized = normalized.replace(/[^a-z0-9_]+/g, '_');
+
+  // Collapse multiple underscores
+  normalized = normalized.replace(/_+/g, '_');
+
+  // Remove leading/trailing underscores
+  normalized = normalized.replace(/^_+|_+$/g, '');
+
+  // Fallback generic mapping (optional, can be expanded)
+  const genericMappings: Record<string, string> = {
+      'search_term': 'search_term',
+      'search_volume': 'search_volume',
+      'volume': 'search_volume',
+      'click_share': 'click_share',
+      'conversion_rate': 'search_conversion_rate', // Map generic to specific if common
+      'asin': 'ASIN', // Maintain case for ASIN if needed by schema
+      'keyword': 'Keyword', // Maintain case for Keyword if needed
+      'format': 'Format_Inferred',
+      'function': 'Function_Inferred',
+      'values': 'Values_Inferred',
+      'competition': 'Competition',
+      'top_clicked_product_1_title': 'Top_Clicked_Product_1_Title',
+      'top_clicked_product_1_asin': 'Top_Clicked_Product_1_ASIN',
+      'top_clicked_product_2_title': 'Top_Clicked_Product_2_Title',
+      'top_clicked_product_2_asin': 'Top_Clicked_Product_2_ASIN',
+      'top_clicked_product_3_title': 'Top_Clicked_Product_3_Title',
+      'top_clicked_product_3_asin': 'Top_Clicked_Product_3_ASIN'
   }
-  
-  // Replace spaces with underscores and check mappings
-  normalized = normalized.replace(/\s+/g, '_')
-  return headerMappings[normalized.replace(/_/g, ' ')] || normalized
+
+  return genericMappings[normalized] || normalized;
 }
 
 /**
