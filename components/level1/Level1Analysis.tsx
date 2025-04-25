@@ -21,6 +21,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { readCSVFile } from "./csv-parser"
+import { parseFile } from "@/lib/parsers/fileParser"
+import { useToast } from "@/components/ui/use-toast"
 
 // Types for our processed Level 1 data
 interface ProcessedLevel1Data {
@@ -50,10 +52,15 @@ interface ProcessedLevel1Data {
   }
 }
 
-export default function Level1Analysis() {
+interface Level1AnalysisProps {
+  projectId: string
+}
+
+export default function Level1Analysis({ projectId }: Level1AnalysisProps) {
   const [rawData, setRawData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [uploadSuccess, setUploadSuccess] = useState(false)
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({
     key: 'scores.opportunity',
     direction: 'desc'
@@ -67,6 +74,8 @@ export default function Level1Analysis() {
     showEmerging: true,
     minSearchVolume: 0
   })
+  
+  const { toast } = useToast()
   
   // Process the raw CSV data using our utility functions
   const processedData = useMemo<ProcessedLevel1Data[]>(() => {
@@ -119,20 +128,60 @@ export default function Level1Analysis() {
   const handleFileUpload = async (file: File) => {
     setLoading(true)
     setError(null)
+    setUploadSuccess(false)
     
     try {
-      // Parse the CSV file using our utility
-      const csvData = await readCSVFile(file)
+      // Parse the file using our utility
+      const parsedFile = await parseFile(file, 1)
       
-      if (!csvData || csvData.length === 0) {
-        throw new Error("No data found in the CSV file")
+      if (!parsedFile.data || parsedFile.data.length === 0) {
+        throw new Error("No data found in the file")
       }
       
       // Set the raw data for processing
-      setRawData(csvData)
+      setRawData(parsedFile.data)
+      
+      // Send the parsed data to the API
+      const response = await fetch('/api/files/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          project_id: projectId,
+          level: 1,
+          original_filename: parsedFile.originalFilename,
+          parsed_json: parsedFile.data,
+          parser_version: parsedFile.parserVersion
+        })
+      })
+      
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status} ${response.statusText}`)
+      }
+      
+      const result = await response.json()
+      
+      if (!result.success) {
+        throw new Error(result.message || 'Failed to upload file')
+      }
+      
+      // Show success message
+      toast({
+        title: "Upload successful",
+        description: `File "${parsedFile.originalFilename}" has been uploaded and processed.`,
+      })
+      
+      setUploadSuccess(true)
     } catch (err) {
-      setError("Failed to process data. Please check the CSV format.")
-      console.error(err)
+      console.error("File processing error:", err)
+      setError(err instanceof Error ? err.message : "Failed to process data. Please check the format.")
+      
+      toast({
+        variant: "destructive",
+        title: "Upload failed",
+        description: err instanceof Error ? err.message : "Failed to process data",
+      })
     } finally {
       setLoading(false)
     }
@@ -248,21 +297,24 @@ export default function Level1Analysis() {
           <CardContent className="flex flex-col items-center">
             <Upload
               onUpload={handleFileUpload}
-              accept=".csv"
-              loading={loading}
+              acceptedFileTypes={[".csv", ".xlsx", ".xls"]}
+              maxSize={10}
               label="Upload Category Search CSV"
-              helpText="Drag and drop your Category Search CSV file or click to browse"
+              helpText="Drag and drop your file here or click to browse"
+              loading={loading}
+              projectId={projectId}
+              level={1}
             />
+            
+            {error && (
+              <Alert variant="destructive" className="mt-4">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Error</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
           </CardContent>
         </Card>
-      )}
-      
-      {error && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Error</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
       )}
       
       {loading && (

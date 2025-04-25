@@ -20,6 +20,8 @@ interface UploadProps {
   loading?: boolean
   label?: string
   helpText?: string
+  projectId?: string | null
+  level?: number
 }
 
 interface HeaderInfo {
@@ -43,7 +45,9 @@ export function Upload({
   fileUrl,
   loading,
   label = "Upload File",
-  helpText = "Drag and drop your file here or click to browse"
+  helpText = "Drag and drop your file here or click to browse",
+  projectId,
+  level
 }: UploadProps) {
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(loading || false)
@@ -109,6 +113,15 @@ export function Upload({
       })
     }, 100)
 
+    // Check if projectId is provided when using an endpoint
+    if (endpoint && !projectId) {
+      setError("Cannot upload file: No project selected.")
+      setUploading(false)
+      setProgress(0)
+      clearInterval(interval) // Stop progress simulation
+      return
+    }
+
     try {
       const formData = new FormData()
 
@@ -125,7 +138,15 @@ export function Upload({
         throw new Error("No endpoint provided for upload")
       }
 
-      console.log("Sending request to:", endpoint)
+      // Add projectId and level to FormData if endpoint exists and projectId is provided
+      if (projectId) {
+        formData.append("project_id", projectId)
+      }
+      if (level !== undefined) {
+        formData.append("level", String(level))
+      }
+
+      console.log("Sending request to:", endpoint, "with formData containing project_id and level")
       const response = await fetch(endpoint, {
         method: "POST",
         body: formData,
@@ -205,6 +226,12 @@ export function Upload({
   }
 
   const handleUpload = () => {
+    // Add check for projectId before allowing upload via endpoint
+    if (endpoint && !projectId) {
+      setError("Please select or create a project first.")
+      return
+    }
+
     if (file) {
       if (onUpload) {
         onUpload(file)
@@ -287,16 +314,18 @@ export function Upload({
         </div>
       ) : (
         <div
-          className={`border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center cursor-pointer ${
+          className={`border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center ${
+            !projectId && endpoint ? 'cursor-not-allowed bg-gray-100 opacity-60' : 'cursor-pointer'
+          } ${
             error || validationErrors.length > 0
               ? "border-red-300 bg-red-50"
               : success
                 ? "border-green-300 bg-green-50"
                 : "border-gray-300 hover:border-gray-400 bg-gray-50 hover:bg-gray-100"
           }`}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
+          onDragOver={!projectId && endpoint ? undefined : handleDragOver}
+          onDrop={!projectId && endpoint ? undefined : handleDrop}
+          onClick={() => !projectId && endpoint ? null : fileInputRef.current?.click()}
         >
           <input
             type="file"
@@ -348,12 +377,16 @@ export function Upload({
               <p className="text-sm text-green-600">Upload successful!</p>
             </>
           )}
+
+          {!projectId && endpoint && (
+            <p className="text-sm text-destructive mt-2 font-semibold">Please select or create a project first.</p>
+          )}
         </div>
       )}
 
       {file && !uploading && !success && !uploadStarted && (
         <div className="mt-4">
-          <Button onClick={handleUpload} className="w-full">
+          <Button onClick={handleUpload} className="w-full" disabled={!projectId && !!endpoint}>
             {label}
           </Button>
         </div>

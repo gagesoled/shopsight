@@ -1,15 +1,80 @@
 "use client"
 
+import { useState } from "react"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { ArrowRight, Database, Search, Layers } from "lucide-react"
+import { ArrowRight, Database, Search, Layers, Folders } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { Input } from "@/components/ui/input"
+import { useProjectSelection } from "@/hooks/useProjectSelection"
+import { Loader2 } from "lucide-react"
+import { useToast } from "@/components/ui/use-toast"
 
 export default function Home() {
   const router = useRouter()
+  const [projectName, setProjectName] = useState("")
+  const [isCreating, setIsCreating] = useState(false)
+  const [selectedProjectId, setSelectedProjectId] = useProjectSelection()
+  const { toast } = useToast()
   
   const navigateTo = (path: string) => {
     router.push(path)
+  }
+  
+  const handleCreateProject = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!projectName.trim()) {
+      toast({ variant: "destructive", title: "Error", description: "Project name cannot be empty." })
+      return
+    }
+    setIsCreating(true)
+    try {
+      console.log("Sending project creation request:", { name: projectName });
+      
+      const response = await fetch('/api/projects/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: projectName }),
+      })
+      
+      // Check if the response is not OK before trying to parse JSON
+      if (!response.ok) {
+        const statusText = response.statusText || `HTTP error ${response.status}`;
+        console.error("API error:", statusText);
+        throw new Error(`Failed to create project: ${statusText}`);
+      }
+      
+      // Try to parse the JSON response
+      let result;
+      try {
+        result = await response.json();
+      } catch (parseError) {
+        console.error("Failed to parse API response:", parseError);
+        throw new Error("Server returned an invalid response. Please try again later.");
+      }
+
+      if (!result.success) {
+        throw new Error(result.message || "Unknown error occurred");
+      }
+
+      const newProjectId = result.data?.id
+      if (!newProjectId) {
+        throw new Error("Project created but no ID returned.")
+      }
+
+      setSelectedProjectId(newProjectId)
+      setProjectName("")
+      toast({ title: "Success", description: `Project "${result.data.name}" created!` })
+      console.log("Project created:", result.data)
+
+    } catch (error) {
+      console.error("Project creation error:", error)
+      const message = error instanceof Error ? error.message : "An unknown error occurred."
+      toast({ variant: "destructive", title: "Error", description: `Project creation failed: ${message}` })
+      setSelectedProjectId(null)
+    } finally {
+      setIsCreating(false)
+    }
   }
   
   return (
@@ -19,6 +84,70 @@ export default function Home() {
         <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
           Identify market opportunities and analyze customer behavior at different levels of market research
         </p>
+      </div>
+      
+      <div className="mb-12 max-w-2xl mx-auto">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex justify-between items-center">
+              Manage Project
+              {selectedProjectId && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigateTo("/projects")}
+                >
+                  <Folders className="mr-2 h-4 w-4" />
+                  View All Projects
+                </Button>
+              )}
+            </CardTitle>
+            <CardDescription>
+              {selectedProjectId
+                ? `Current Project ID: ${selectedProjectId}`
+                : "Create a new project to start analyzing files."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleCreateProject} className="flex gap-2">
+              <Input
+                type="text"
+                placeholder="New Project Name"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                disabled={isCreating || !!selectedProjectId}
+                className="flex-1"
+              />
+              <Button type="submit" disabled={isCreating || !!selectedProjectId}>
+                {isCreating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  "Create Project"
+                )}
+              </Button>
+            </form>
+            {selectedProjectId && (
+              <div className="flex justify-between items-center mt-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectedProjectId(null)}
+                >
+                  Select Different Project / Create New
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => navigateTo(`/projects/${selectedProjectId}`)}
+                >
+                  Open Current Project
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
       
       <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">

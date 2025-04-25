@@ -7,9 +7,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ClusterCard } from "@/components/cluster-card"
 import { Loader2 } from "lucide-react"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { useProjectSelection } from "@/hooks/useProjectSelection"
+import { useToast } from "@/components/ui/use-toast"
+import { useRouter } from "next/navigation"
 
 interface Tag {
   category: string
@@ -81,37 +84,35 @@ export default function NicheExplorer() {
   const [summaryError, setSummaryError] = useState<string | null>(null)
   const [level2Loaded, setLevel2Loaded] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null)
-  // Sorting configuration for quantitative columns (any type to avoid TSX parsing issues)
   const [sortConfig, setSortConfig] = useState(null as any)
+  
+  const [selectedProjectId, setSelectedProjectId] = useProjectSelection()
+  const { toast } = useToast()
+  const router = useRouter()
 
-  // Compute sorted search terms based on sortConfig
   const sortedSearchTerms = useMemo(() => {
     if (!sortConfig) return searchTerms
     const { key, direction } = sortConfig
     return [...searchTerms].sort((a, b) => {
       const aVal = (a as any)[key] ?? 0
       const bVal = (b as any)[key] ?? 0
-      // String comparison for text
       if (typeof aVal === 'string' && typeof bVal === 'string') {
         return direction === 'asc'
           ? aVal.localeCompare(bVal)
           : bVal.localeCompare(aVal)
       }
-      // Numeric comparison
       return direction === 'asc' ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number)
     })
   }, [searchTerms, sortConfig])
 
-  // Handle sorting when header clicked, key is string
   const handleSort = (key: string) => {
-    setSortConfig(prev =>
+    setSortConfig((prev: { key: string; direction: 'asc' | 'desc' } | null) =>
       prev && prev.key === key
         ? { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
         : { key, direction: 'asc' }
     )
   }
 
-  // Helper function to format percentage values
   const formatPercentage = (value: number | undefined | null): string => {
     if (value === undefined || value === null || isNaN(Number(value))) {
       return "N/A";
@@ -119,7 +120,6 @@ export default function NicheExplorer() {
     return `${(value * 100).toFixed(1)}%`;
   };
 
-  // Helper function for growth badge
   const renderGrowthBadge = (value: number | undefined | null) => {
     if (value === undefined || value === null || isNaN(Number(value))) {
       return <Badge variant="outline">N/A</Badge>;
@@ -133,7 +133,13 @@ export default function NicheExplorer() {
   };
 
   useEffect(() => {
-    // Get selected niche from localStorage
+    if (!selectedProjectId && typeof window !== 'undefined') {
+      const storedId = localStorage.getItem('selectedProjectId')
+      if (storedId) setSelectedProjectId(storedId)
+    }
+  }, [selectedProjectId, setSelectedProjectId])
+
+  useEffect(() => {
     const niche = localStorage.getItem("selectedNiche")
     if (niche) {
       setSelectedNiche(niche)
@@ -146,6 +152,7 @@ export default function NicheExplorer() {
     setProducts(data.products || []);
     setClusters(data.clusters || []);
     setLevel2Loaded(true);
+    toast({ title: "Success", description: "Level 2 data processed and saved." });
   }
 
   const handleSelectProduct = (asin: string | undefined) => {
@@ -154,7 +161,6 @@ export default function NicheExplorer() {
       return;
     }
     setSelectedProduct(asin);
-    // Navigate to product keyword view with the selected product
     window.location.href = `/product-keywords?asin=${asin}`;
   }
 
@@ -165,7 +171,6 @@ export default function NicheExplorer() {
     setSummaryError(null);
 
     try {
-      // Prepare cluster data for the API
       const clusterDataForApi = clusters.map(c => ({
         id: c.id,
         name: c.name,
@@ -173,7 +178,6 @@ export default function NicheExplorer() {
         opportunityScore: c.opportunityScore,
         keywords: c.keywords,
         tags: c.tags,
-        // Include any other metrics needed by the API
         searchVolume: c.searchVolume,
         clickShare: c.clickShare,
       }));
@@ -192,7 +196,6 @@ export default function NicheExplorer() {
         throw new Error(result.message || "Failed to generate summary");
       }
 
-      // Ensure result.data.summary exists
       setSummary(result.data?.summary ?? "No summary content received.");
     } catch (error) {
       setSummaryError((error as Error).message || "An error occurred");
@@ -213,22 +216,38 @@ export default function NicheExplorer() {
       </div>
 
       <div className="grid grid-cols-1 gap-8 mb-10">
-        <Card>
-          <CardHeader>
-            <CardTitle>Upload Level 2 Data</CardTitle>
-            <CardDescription>
-              Upload your Excel (.xlsx, .xls) or CSV (.csv) file with Search Terms, Niche Insights, and Products data
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Upload
-              endpoint="/api/upload/level2"
-              acceptedFileTypes={[".xlsx", ".xls", ".csv"]}
-              maxSize={5}
-              onSuccess={handleLevel2Success}
-            />
-          </CardContent>
-        </Card>
+        {!selectedProjectId ? (
+          <Card className="mb-10">
+            <CardHeader>
+              <CardTitle>Select or Create a Project</CardTitle>
+              <CardDescription>Please create or select a project on the home page before uploading files.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button onClick={() => router.push('/')}>Go to Home</Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardHeader>
+              <CardTitle>Upload Level 2 Data</CardTitle>
+              <CardDescription>
+                Upload your Excel (.xlsx, .xls) or CSV (.csv) file with Search Terms, Niche Insights, and Products data
+                <br/>
+                Uploading for Project ID: {selectedProjectId}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Upload
+                endpoint="/api/upload/level2"
+                acceptedFileTypes={[".xlsx", ".xls", ".csv"]}
+                maxSize={5}
+                onSuccess={handleLevel2Success}
+                projectId={selectedProjectId}
+                level={2}
+              />
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {level2Loaded && (

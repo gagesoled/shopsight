@@ -2,11 +2,17 @@ import { NextResponse, type NextRequest } from "next/server"
 import { parseLevel1Data } from "@/lib/parsers/unified-parser"
 import Papa from 'papaparse'
 import { mapToLevel1Schema } from "@/lib/parsers/unified-parser"
+import { supabaseAdmin } from "@/lib/supabaseClient" // Import Supabase admin client
 
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
     const file = formData.get("file") as File | null
+    
+    // Extract project_id and level from formData
+    const projectId = formData.get("project_id") as string | null
+    const levelStr = formData.get("level") as string | null
+    const level = levelStr ? parseInt(levelStr, 10) : 1 // Default to level 1 if not provided
 
     if (!file) {
       console.error("No file found in form data")
@@ -16,10 +22,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Validate project_id is provided
+    if (!projectId) {
+      console.error("No project_id found in form data")
+      return NextResponse.json(
+        { success: false, message: "Project ID is required" },
+        { status: 400 }
+      )
+    }
+
     console.log("File received for Level 1 processing:", {
       name: file.name,
       type: file.type,
       size: file.size,
+      projectId: projectId,
+      level: level
     })
 
     // Server-side file processing
@@ -60,12 +77,14 @@ export async function POST(request: NextRequest) {
       // Parse the data using our schema mapping
       const { data: validData, errors: validationErrors } = mapToLevel1Schema(parsedCSV.data)
       
-      const headerInfo = `
+      let headerInfo = `
 File type: ${file.type}
 Rows found: ${parsedCSV.data.length}
 Valid entries: ${validData.length}
 ${validationErrors.length > 0 ? `Validation errors: ${validationErrors.length}` : ''}
 Headers: ${parsedCSV.meta.fields?.join(', ') || 'None detected'}
+Project ID: ${projectId}
+Level: ${level}
       `
 
       console.log("Parsing results:", {
@@ -81,7 +100,6 @@ Headers: ${parsedCSV.meta.fields?.join(', ') || 'None detected'}
       if (validationErrors.length > 0) {
         console.error("First 5 validation errors:", validationErrors.slice(0, 5));
       }
-
 
       // Check for validation errors
       if (validationErrors.length > 0 && validData.length === 0) {
@@ -108,11 +126,38 @@ Headers: ${parsedCSV.meta.fields?.join(', ') || 'None detected'}
         )
       }
 
+      // Save data to Supabase
+      let dbError = null; 
+      if (validData.length > 0) {
+        console.log(`Saving ${validData.length} records to Supabase for project ${projectId}, level ${level}...`);
+        const { data: dbData, error } = await supabaseAdmin
+          .from('files')
+          .insert({
+            project_id: projectId,
+            level: level,
+            original_filename: file.name,
+            parsed_json: validData, // Store the array of parsed objects
+            parser_version: 'v1.0' // Or dynamically set later
+          })
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Supabase file insert error:', error);
+          dbError = error;
+          // Add DB error information to the header info
+          headerInfo += `\nWARNING: Failed to save parsed data to database: ${error.message}`;
+        } else {
+          console.log('File data saved to Supabase successfully:', dbData);
+          headerInfo += `\nSaved file data to Supabase (ID: ${dbData?.id})`;
+        }
+      }
+
       console.log(`Successfully parsed ${validData.length} Level 1 records.`);
       // Return success with the parsed data and header info
       return NextResponse.json({
           success: true,
-          message: `Successfully parsed ${validData.length} records.`,
+          message: `Successfully parsed ${validData.length} records. ${dbError ? 'Failed to save to DB.' : 'Saved to DB.'}`,
           data: {
               data: validData,
               headerInfo: headerInfo,
