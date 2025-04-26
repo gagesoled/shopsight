@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress"
 import { UploadIcon, File, CheckCircle, AlertCircle, Info } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { toast } from "@/components/ui/use-toast"
 
 interface UploadProps {
   endpoint?: string
@@ -22,6 +23,7 @@ interface UploadProps {
   helpText?: string
   projectId?: string | null
   level?: number
+  additionalFields?: Record<string, string>
 }
 
 interface HeaderInfo {
@@ -36,7 +38,7 @@ interface HeaderInfo {
 }
 
 export function Upload({ 
-  endpoint, 
+  endpoint = "",
   acceptedFileTypes = [".csv"], 
   maxSize = 10, 
   onSuccess, 
@@ -47,7 +49,8 @@ export function Upload({
   label = "Upload File",
   helpText = "Drag and drop your file here or click to browse",
   projectId,
-  level
+  level,
+  additionalFields = {}
 }: UploadProps) {
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(loading || false)
@@ -146,6 +149,11 @@ export function Upload({
         formData.append("level", String(level))
       }
 
+      // Add any additional fields
+      for (const [key, value] of Object.entries(additionalFields || {})) {
+        formData.append(key, value)
+      }
+
       console.log("Sending request to:", endpoint, "with formData containing project_id and level")
       const response = await fetch(endpoint, {
         method: "POST",
@@ -225,27 +233,106 @@ export function Upload({
     }
   }
 
-  const handleUpload = () => {
-    // Add check for projectId before allowing upload via endpoint
-    if (endpoint && !projectId) {
-      setError("Please select or create a project first.")
+  const handleUpload = async (file: File) => {
+    if (!file) {
+      toast({
+        title: "No file selected",
+        description: "Please select a file to upload.",
+        variant: "destructive",
+      })
       return
     }
 
-    if (file) {
-      if (onUpload) {
-        onUpload(file)
-        setUploadStarted(true)
-      } else if (endpoint) {
-        processFile(file, null)
-      } else {
-        // No endpoint and no onUpload handler, show an error
-        setError("No upload handler configured")
+    if (maxSize && file.size > maxSize * 1024 * 1024) {
+      toast({
+        title: "File is too large",
+        description: `Maximum file size is ${maxSize}MB.`,
+        variant: "destructive",
+      })
+      return
+    }
+
+    setUploading(true)
+    setError(null)
+
+    try {
+      // Create FormData instance
+      const formData = new FormData()
+      
+      // Add file to form data
+      formData.append("file", file)
+      
+      // Add extra data if provided
+      if (projectId) {
+        formData.append("project_id", projectId)
       }
-    } else if (fileUrl && endpoint) {
-      processFile(null, fileUrl)
-    } else if (fileUrl) {
-      setError("No endpoint provided for URL processing")
+      
+      if (level !== undefined) {
+        formData.append("level", level.toString())
+      }
+
+      // Add any additional fields
+      for (const [key, value] of Object.entries(additionalFields || {})) {
+        formData.append(key, value)
+      }
+
+      console.log("Sending request to:", endpoint, "with formData containing project_id and level");
+      
+      // Send request to API
+      const response = await fetch(endpoint, {
+        method: "POST",
+        body: formData,
+      })
+
+      // Handle errors
+      if (!response.ok) {
+        let errorDetail = "";
+        try {
+          const errorData = await response.json();
+          errorDetail = errorData.message || errorData.error || "";
+        } catch (e) {
+          // If JSON parsing fails, use status text
+          errorDetail = response.statusText;
+        }
+        
+        throw new Error(`Server error: ${response.status} ${errorDetail}`);
+      }
+
+      try {
+        // Parse JSON response
+        const data = await response.json()
+        
+        console.log("Upload response:", data);
+
+        if (data.success) {
+          // Success message
+          toast({
+            title: "Upload successful",
+            description: data.message || "File uploaded successfully.",
+          })
+          
+          // Call onSuccess callback
+          if (onSuccess) {
+            onSuccess(data.data)
+          }
+        } else {
+          throw new Error(data.message || "Failed to upload file")
+        }
+      } catch (jsonError) {
+        console.error("Error parsing JSON response:", jsonError)
+        throw new Error("Failed to parse server response")
+      }
+    } catch (error) {
+      // Handle errors
+      console.error("Upload error:", error)
+      setError(error instanceof Error ? error.message : "An unknown error occurred")
+      toast({
+        title: "Upload failed",
+        description: error instanceof Error ? error.message : "Failed to upload file",
+        variant: "destructive",
+      })
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -386,7 +473,7 @@ export function Upload({
 
       {file && !uploading && !success && !uploadStarted && (
         <div className="mt-4">
-          <Button onClick={handleUpload} className="w-full" disabled={!projectId && !!endpoint}>
+          <Button onClick={() => handleUpload(file as File)} className="w-full" disabled={!projectId && !!endpoint}>
             {label}
           </Button>
         </div>
