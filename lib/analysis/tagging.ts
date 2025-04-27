@@ -8,6 +8,11 @@ export function applyTags(keyword: string, tags: Tag[]): Record<string, string[]
   const k = keyword.toLowerCase()
 
   console.log(`Applying tags to keyword: "${keyword}"`)
+  
+  if (!tags || tags.length === 0) {
+    console.warn("No tags provided for tagging - returning empty result")
+    return result
+  }
 
   // Group tags by category
   const tagsByCategory = tags.reduce(
@@ -28,19 +33,33 @@ export function applyTags(keyword: string, tags: Tag[]): Record<string, string[]
 
   // Apply tags for each category
   Object.entries(tagsByCategory).forEach(([category, categoryTags]) => {
+    console.log(`Processing category: ${category} with ${categoryTags.length} tags`)
+    
     categoryTags.forEach((tag) => {
-      // Split trigger by pipe to get individual trigger words/phrases
-      const triggers = tag.trigger.split("|").map((t) => t.trim().toLowerCase())
+      if (!tag.trigger || tag.trigger.trim() === '') {
+        console.warn(`Tag "${tag.tag}" in category "${category}" has no trigger words - skipping`)
+        return
+      }
+      
+      // Split trigger by pipe or comma to get individual trigger words/phrases
+      const triggers = tag.trigger.split(/[|,]/).map((t) => t.trim().toLowerCase()).filter(t => t.length > 0)
+      
+      if (triggers.length === 0) {
+        console.warn(`Tag "${tag.tag}" in category "${category}" has no valid triggers after splitting/trimming - skipping`)
+        return
+      }
 
       // Check if any trigger matches the keyword
-      if (triggers.some((trigger) => k.includes(trigger))) {
+      const matchedTrigger = triggers.find(trigger => k.includes(trigger))
+      if (matchedTrigger) {
         result[category].push(tag.tag)
-        console.log(`Tag applied: ${category} - ${tag.tag} (matched trigger: ${triggers.find((t) => k.includes(t))})`)
+        console.log(`✓ Tag applied: ${category} - ${tag.tag} (matched trigger: "${matchedTrigger}" in "${k}")`)
       }
     })
   })
 
-  console.log(`Tags applied to "${keyword}":`, result)
+  const totalTagsApplied = Object.values(result).flat().length
+  console.log(`Tags applied to "${keyword}": ${totalTagsApplied} total tags across ${Object.keys(result).length} categories`, result)
   return result
 }
 
@@ -48,6 +67,11 @@ export function applyTags(keyword: string, tags: Tag[]): Record<string, string[]
  * Parse tag ontology from JSON
  */
 export function parseTagOntology(jsonData: any[]): Tag[] {
+  if (!jsonData || !Array.isArray(jsonData)) {
+    console.error("Invalid tag ontology data provided - expected array")
+    return []
+  }
+  
   const tags = jsonData.map((item) => ({
     category: item.Category,
     tag: item.Tag,

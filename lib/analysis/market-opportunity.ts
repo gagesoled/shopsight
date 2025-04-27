@@ -3,6 +3,8 @@
  * Provides functions for calculating opportunity scores and market signals
  */
 
+import { Level1Data } from "../validation";
+
 export interface NicheMetrics {
   name: string
   searchVolume: number
@@ -10,6 +12,33 @@ export interface NicheMetrics {
   numTopClickedProducts: number
   avgUnitsSold: number
   unitsSoldTotal: number
+}
+
+export interface ProcessedLevel1Data {
+  customerNeed: string;
+  topSearchTerms: string[];
+  metrics: {
+    searchVolume: number;
+    searchVolumeGrowth: number;
+    searchVolume90d: number;
+    searchVolumeGrowth90d: number;
+    unitsSold: number;
+    avgUnitsSold: number;
+    numTopClickedProducts: number;
+    averagePrice: number;
+    minPrice: number;
+    maxPrice: number;
+    returnRate: number;
+  };
+  scores: {
+    opportunity: number;
+    emergence: number;
+    seasonality: number;
+  };
+  flags: {
+    isEmerging: boolean;
+    isSeasonal: boolean;
+  };
 }
 
 /**
@@ -75,70 +104,128 @@ export function calculateSeasonalityIndex(
 }
 
 /**
- * Processes raw Level 1 CSV data and returns a structured dataset with calculated metrics
+ * Process raw level 1 data into structured format with scoring
+ * @param data Raw level 1 data from CSV or API
+ * @returns Processed data with metrics and scoring
  */
-export function processLevel1Data(rawData: any[]): any[] {
-  if (!rawData || rawData.length === 0) return []
-  
-  return rawData.map(item => {
-    // Extract metrics from raw data
-    const searchVolume = Number(item["Search Volume (Past 360 days)"]) || 0
-    const searchVolumeGrowth = Number(item["Search Volume Growth (Past 180 days)"]) || 0
-    const searchVolume90d = Number(item["Search Volume (Past 90 days)"]) || 0
-    const searchVolumeGrowth90d = Number(item["Search Volume Growth (Past 90 days)"]) || 0
-    const unitsSoldLowerBound = Number(item["Units Sold Lower Bound (Past 360 days)"]) || 0
-    const unitsSoldUpperBound = Number(item["Units Sold Upper Bound (Past 360 days)"]) || 0
-    const unitsSoldAvgLower = Number(item["Range of Average Units Sold Lower Bound (Past 360 days)"]) || 0
-    const unitsSoldAvgUpper = Number(item["Range of Average Units Sold Upper Bound (Past 360 days)"]) || 0
-    const numTopClickedProducts = Number(item["# of Top Clicked Products"]) || 0
-    
-    // Calculate average metrics when ranges are provided
-    const avgUnitsSold = (unitsSoldAvgLower + unitsSoldAvgUpper) / 2
-    const totalUnitsSold = (unitsSoldLowerBound + unitsSoldUpperBound) / 2
-    
-    // Calculate emergence and seasonality signals
-    const emergenceScore = calculateEmergenceFlag(
+export function processLevel1Data(data: any[]): ProcessedLevel1Data[] {
+  console.log("Starting processLevel1Data with", data.length, "records");
+  // Debug the data to understand its structure
+  if (data.length > 0) {
+    console.log("Sample record keys:", Object.keys(data[0]));
+  }
+
+  try {
+    return data.map((item) => {
+      // Get the customer need (different possible field names)
+      const customerNeed = 
+        item.Customer_Need || 
+        item.CustomerNeed || 
+        item.customer_need || 
+        item["Customer Need"] || 
+        "Unknown";
+      
+      // Extract search volume with fallbacks for different field names
+      const searchVolume = getNumberValue(
+        item.Search_Volume || 
+        item.SearchVolume || 
+        item["Search Volume"] ||
+        item["Search Volume (Past 360 days)"]
+      );
+      
+      // Extract search volume growth with fallbacks
+      const searchVolumeGrowth = getNumberValue(
+        item.Search_Volume_Growth_180 || 
+        item.SearchVolumeGrowth || 
+        item["Search Volume Growth"] ||
+        item["Search Volume Growth (Past 180 days)"]
+      ) / 100; // Convert from percentage to decimal if needed
+      
+      // Extract 90-day metrics with fallbacks
+      const searchVolume90d = getNumberValue(
+        item.Search_Volume_90 || 
+        item["Search Volume (Past 90 days)"]
+      );
+      
+      const searchVolumeGrowth90d = getNumberValue(
+        item.Search_Volume_Growth_90 || 
+        item["Search Volume Growth (Past 90 days)"]
+      ) / 100; // Convert from percentage to decimal if needed
+      
+      // Extract units sold data with fallbacks
+      let unitsSold = 0;
+      if (item.Units_Sold !== undefined) {
+        unitsSold = getNumberValue(item.Units_Sold);
+      } else if (item.Units_Sold_Lower !== undefined && item.Units_Sold_Upper !== undefined) {
+        const lower = getNumberValue(item.Units_Sold_Lower);
+        const upper = getNumberValue(item.Units_Sold_Upper);
+        unitsSold = (lower + upper) / 2; // Use the average
+      } else if (item["Units Sold Lower Bound (Past 360 days)"] !== undefined && 
+                 item["Units Sold Upper Bound (Past 360 days)"] !== undefined) {
+        const lower = getNumberValue(item["Units Sold Lower Bound (Past 360 days)"]);
+        const upper = getNumberValue(item["Units Sold Upper Bound (Past 360 days)"]);
+        unitsSold = (lower + upper) / 2;
+      }
+      
+      // Number of top clicked products
+      const numTopClickedProducts = getNumberValue(
+        item.Top_Clicked_Products || 
+        item.TopClickedProducts || 
+        item["# of Top Clicked Products"] || 
+        0
+      );
+      
+      // Average units sold
+      const avgUnitsSold = unitsSold / Math.max(1, numTopClickedProducts);
+      
+      // Extract price data
+      const averagePrice = getNumberValue(item.Average_Price || item.AveragePrice || 0);
+      const minPrice = getNumberValue(item.Min_Price || item.MinPrice || 0);
+      const maxPrice = getNumberValue(item.Max_Price || item.MaxPrice || 0);
+      
+      // Get return rate if available
+      const returnRate = getNumberValue(item.Return_Rate || item.ReturnRate || 0) / 100;
+      
+      // Get top search terms (different possible field naming patterns)
+      const topSearchTerms = [];
+      for (let i = 1; i <= 3; i++) {
+        const term = 
+          item[`Top_Search_Term_${i}`] || 
+          item[`TopSearchTerm${i}`] || 
+          item[`Top Search Term ${i}`];
+        if (term) topSearchTerms.push(term);
+      }
+      
+      // Calculate scores
+      const opportunityScore = calculateOpportunityScore(
       searchVolume,
-      searchVolumeGrowth90d,
-      searchVolumeGrowth
-    )
-    
-    const seasonalityScore = calculateSeasonalityIndex(
-      searchVolumeGrowth90d,
-      searchVolumeGrowth,
-      searchVolume90d,
-      searchVolume
-    )
-    
-    // Calculate opportunity score
-    const opportunityScore = calculateRefinedOpportunityScore({
-      name: item["Customer Need"],
-      searchVolume,
-      growthRate: searchVolumeGrowth,
-      numTopClickedProducts,
-      avgUnitsSold,
-      unitsSoldTotal: totalUnitsSold
-    })
+        searchVolumeGrowth, 
+        unitsSold, 
+        numTopClickedProducts
+      );
+      
+      const emergenceScore = calculateEmergenceScore(searchVolumeGrowth, searchVolumeGrowth90d);
+      const seasonalityScore = calculateSeasonalityScore(searchVolume, searchVolume90d);
+      
+      // Determine flags
+      const isEmerging = emergenceScore > 70;
+      const isSeasonal = seasonalityScore > 70;
     
     return {
-      customerNeed: item["Customer Need"],
-      topSearchTerms: [
-        item["Top Search Term 1"],
-        item["Top Search Term 2"],
-        item["Top Search Term 3"]
-      ].filter(Boolean),
+        customerNeed,
+        topSearchTerms,
       metrics: {
         searchVolume,
         searchVolumeGrowth,
         searchVolume90d,
         searchVolumeGrowth90d,
-        unitsSold: totalUnitsSold,
+          unitsSold,
         avgUnitsSold,
         numTopClickedProducts,
-        averagePrice: Number(item["Average Price (USD)"]) || 0,
-        minPrice: Number(item["Minimum Price (Past 360 days) (USD)"]) || 0,
-        maxPrice: Number(item["Maximum Price (Past 360 days) (USD)"]) || 0,
-        returnRate: Number(item["Return Rate (Past 360 days)"]) || 0
+          averagePrice,
+          minPrice,
+          maxPrice,
+          returnRate
       },
       scores: {
         opportunity: opportunityScore,
@@ -146,9 +233,95 @@ export function processLevel1Data(rawData: any[]): any[] {
         seasonality: seasonalityScore
       },
       flags: {
-        isEmerging: emergenceScore > 0.6,
-        isSeasonal: seasonalityScore > 0.7
-      }
-    }
-  }).sort((a, b) => b.scores.opportunity - a.scores.opportunity)
+          isEmerging,
+          isSeasonal
+        }
+      };
+    });
+  } catch (error) {
+    console.error("Error in processLevel1Data:", error);
+    throw error;
+  }
+}
+
+/**
+ * Helper to extract a number value safely from potentially non-numeric data
+ */
+function getNumberValue(value: any): number {
+  if (value === undefined || value === null) return 0;
+  
+  // Handle string percentage values (e.g., "45%")
+  if (typeof value === 'string' && value.endsWith('%')) {
+    const numValue = parseFloat(value.replace('%', ''));
+    return isNaN(numValue) ? 0 : numValue;
+  }
+  
+  // Handle string number values or already numeric values
+  const numValue = typeof value === 'string' ? parseFloat(value) : Number(value);
+  return isNaN(numValue) ? 0 : numValue;
+}
+
+/**
+ * Calculate opportunity score based on key metrics
+ */
+function calculateOpportunityScore(
+  searchVolume: number,
+  searchVolumeGrowth: number,
+  unitsSold: number,
+  numTopClickedProducts: number
+): number {
+  // Normalize inputs to 0-100 scale
+  const volumeScore = Math.min(100, searchVolume / 10000);
+  const growthScore = Math.min(100, (searchVolumeGrowth * 100) * 2); // Double weight for growth
+  
+  // Calculate competition score (inverse of top clicked products)
+  // Fewer competing products = higher score
+  const competitionScore = Math.max(0, 100 - Math.min(100, numTopClickedProducts * 5));
+  
+  // Calculate demand score based on units sold
+  const demandScore = Math.min(100, unitsSold / 1000);
+  
+  // Weighted average of all scores
+  const weightedScore = (
+    (volumeScore * 0.3) +
+    (growthScore * 0.4) +
+    (competitionScore * 0.2) +
+    (demandScore * 0.1)
+  );
+  
+  return Math.round(weightedScore);
+}
+
+/**
+ * Calculate emergence score based on growth patterns
+ */
+function calculateEmergenceScore(overallGrowth: number, recentGrowth: number): number {
+  // If recent growth is higher than overall, it's more likely to be emerging
+  if (recentGrowth > overallGrowth && recentGrowth > 0.1) {
+    // Convert growth to percentage for scoring
+    const recentGrowthPct = recentGrowth * 100;
+    return Math.min(100, Math.round(recentGrowthPct * 1.5));
+  }
+  
+  // Basic emergence score based on overall growth
+  const baseScore = Math.min(100, Math.round((overallGrowth * 100) * 1.2));
+  return baseScore;
+}
+
+/**
+ * Calculate seasonality score based on volume patterns
+ */
+function calculateSeasonalityScore(overallVolume: number, recentVolume: number): number {
+  if (overallVolume === 0) return 0;
+  
+  // Calculate ratio of recent to overall volume
+  const ratio = recentVolume / overallVolume;
+  
+  // If recent volume is significantly different from overall, might be seasonal
+  if (ratio > 1.3 || ratio < 0.7) {
+    const deviation = Math.abs(1 - ratio);
+    return Math.min(100, Math.round(deviation * 150));
+  }
+  
+  return 0;
 } 

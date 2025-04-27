@@ -28,6 +28,13 @@ interface BubbleChartProps {
 }
 
 export function Level1BubbleChart({ data }: BubbleChartProps) {
+  const getPointFillColor = (entry: any): string => {
+    // Color logic based on flags
+    if (entry.seasonality && entry.seasonality > 0.5) return "#a855f7" // Purple for seasonal
+    if (entry.emergence) return "#f59e0b" // Amber for emerging
+    return "#3b82f6" // Blue for standard
+  }
+
   const chartData = useMemo(() => {
     return data.map(item => {
       // Average of Units Sold Bounds for bubble size
@@ -35,6 +42,13 @@ export function Level1BubbleChart({ data }: BubbleChartProps) {
       
       // Log-scale the search volume for better visualization
       const logSearchVolume = Math.log10(Math.max(item.Search_Volume, 1))
+      
+      // Determine the fill color based on properties
+      const fillColor = item.Seasonality && item.Seasonality > 0.5 
+        ? "#a855f7" 
+        : item.Emergence 
+          ? "#f59e0b" 
+          : "#3b82f6"
       
       return {
         name: item.Customer_Need,
@@ -46,7 +60,8 @@ export function Level1BubbleChart({ data }: BubbleChartProps) {
         rawUnits: avgUnitsSold,
         topClicked: item.TopClicked,
         emergence: item.Emergence,
-        seasonality: item.Seasonality
+        seasonality: item.Seasonality,
+        fill: fillColor // Pre-determine the fill color for each point
       }
     })
   }, [data])
@@ -145,12 +160,7 @@ export function Level1BubbleChart({ data }: BubbleChartProps) {
               <Scatter
                 name="Niches"
                 data={chartData}
-                fill={(entry) => {
-                  // Color logic based on flags
-                  if (entry.seasonality && entry.seasonality > 0.5) return "#a855f7" // Purple for seasonal
-                  if (entry.emergence) return "#f59e0b" // Amber for emerging
-                  return "#3b82f6" // Blue for standard
-                }}
+                fill="#3b82f6" // Default color
                 fillOpacity={0.7}
               />
             </ScatterChart>

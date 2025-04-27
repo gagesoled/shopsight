@@ -2,24 +2,24 @@ import { NextResponse, type NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseClient";
 
 export async function GET(req: NextRequest) {
-  console.log("Entering /api/files/list handler...");
+  console.log("Entering /api/files/get handler...");
   
   try {
-    // Get project_id from query parameters
+    // Get file_id from query parameters
     console.log("Parsing URL parameters...");
     const url = new URL(req.url);
-    const projectId = url.searchParams.get('project_id');
-    console.log("Requested project_id:", projectId);
+    const fileId = url.searchParams.get('file_id');
+    console.log("Requested file_id:", fileId);
 
-    if (!projectId) {
-      console.log("Missing required parameter: project_id");
+    if (!fileId) {
+      console.log("Missing required parameter: file_id");
       return NextResponse.json({ 
         success: false, 
-        message: "Project ID is required" 
+        message: "File ID is required" 
       }, { status: 400 });
     }
 
-    console.log(`Preparing to fetch files for project: ${projectId}`);
+    console.log(`Preparing to fetch file with ID: ${fileId}`);
 
     // Validate Supabase client has initialized properly
     console.log("Checking Supabase client status...");
@@ -31,43 +31,50 @@ export async function GET(req: NextRequest) {
       }, { status: 500 });
     }
 
-    // Query Supabase for files associated with this project
-    console.log(`Querying 'files' table for project_id=${projectId}...`);
+    // Query Supabase for the specific file
+    console.log(`Querying 'files' table for id=${fileId}...`);
     
-    // Query the files table directly without checking if it exists
     const { data, error } = await supabaseAdmin
       .from('files')
       .select('*')
-      .eq('project_id', projectId);
+      .eq('id', fileId)
+      .single();
 
     if (error) {
-      console.error("Error fetching files:", error);
+      console.error("Error fetching file:", error);
       console.error("Error details:", JSON.stringify(error));
       
       return NextResponse.json({ 
         success: false, 
-        message: "Failed to fetch files", 
+        message: "Failed to fetch file data", 
         error: error.message 
       }, { status: 500 });
     }
 
-    // Log the number of files found
-    console.log(`Successfully retrieved ${data?.length || 0} files for project ${projectId}`);
+    if (!data) {
+      console.log(`No file found with ID: ${fileId}`);
+      return NextResponse.json({ 
+        success: false, 
+        message: "File not found" 
+      }, { status: 404 });
+    }
+
+    console.log(`Successfully retrieved file with ID ${fileId}`);
     console.log("Returning success response...");
     
     return NextResponse.json({ 
       success: true, 
-      message: "Files retrieved successfully", 
-      data: data || [] 
+      message: "File data retrieved successfully", 
+      data: data 
     });
   } catch (error) {
-    console.error("Unexpected error in files list API:", error);
+    console.error("Unexpected error in file get API:", error);
     console.error("Error stack:", error instanceof Error ? error.stack : "No stack available");
     const message = error instanceof Error ? error.message : "An unexpected error occurred";
     console.log("Returning error response...");
     return NextResponse.json({ 
       success: false, 
-      message: "Failed to retrieve files", 
+      message: "Failed to retrieve file data", 
       error: message 
     }, { status: 500 });
   }

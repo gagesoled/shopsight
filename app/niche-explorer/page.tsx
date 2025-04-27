@@ -6,13 +6,14 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ClusterCard } from "@/components/cluster-card"
-import { Loader2 } from "lucide-react"
+import { Loader2, AlertCircle } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { useProjectSelection } from "@/hooks/useProjectSelection"
 import { useToast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
+import { FileList } from "@/components/FileList"
 
 interface Tag {
   category: string
@@ -86,6 +87,10 @@ export default function NicheExplorer() {
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null)
   const [sortConfig, setSortConfig] = useState(null as any)
   
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null)
+  const [fileLoading, setFileLoading] = useState(false)
+  const [fileError, setFileError] = useState<string | null>(null)
+  
   const [selectedProjectId, setSelectedProjectId] = useProjectSelection()
   const { toast } = useToast()
   const router = useRouter()
@@ -146,6 +151,109 @@ export default function NicheExplorer() {
     }
   }, [])
 
+  const handleFileSelect = async (file: any) => {
+    if (file.id === selectedFileId) return
+    
+    setSelectedFileId(file.id)
+    setFileLoading(true)
+    setFileError(null)
+    
+    // Reset all data states
+    setSearchTerms([])
+    setNicheInsights([])
+    setProducts([])
+    setClusters([])
+    setLevel2Loaded(false)
+    
+    try {
+      const response = await fetch(`/api/files/get?file_id=${file.id}`)
+      
+      if (!response.ok) {
+        throw new Error(`Failed to load file: ${response.statusText}`)
+      }
+      
+      const result = await response.json()
+      
+      if (!result.success) {
+        throw new Error(result.message || 'Failed to load file data')
+      }
+      
+      // Extract the parsed_json data from the file
+      const parsedData = result.data.parsed_json
+      
+      if (!parsedData) {
+        throw new Error('No data found in the selected file')
+      }
+      
+      // Check the file level
+      const fileLevel = result.data.level;
+      
+      if (fileLevel !== 2) {
+        throw new Error(`This is a Level ${fileLevel} file. Please use the ${fileLevel === 1 ? 'Category Search' : 'Product Keywords'} page to view this file.`);
+      }
+      
+      // Handle Level 2 data structure
+      if (parsedData.searchTerms) {
+        setSearchTerms(parsedData.searchTerms || [])
+        setNicheInsights(parsedData.nicheInsights || [])
+        setProducts(parsedData.products || [])
+        setClusters(parsedData.clusters || [])
+        setLevel2Loaded(true)
+        toast({
+          title: "File loaded",
+          description: `${file.original_filename} loaded successfully.`,
+        })
+      } else {
+        // Try to handle older or differently structured Level 2 files
+        let searchTermsData: SearchTerm[] = [];
+        let nicheInsightsData: NicheInsight[] = [];
+        let productsData: Product[] = [];
+        
+        // Check if it's an array that might contain search terms
+        if (Array.isArray(parsedData)) {
+          // Attempt to identify what kind of data this is
+          if (parsedData.length > 0 && parsedData[0].Search_Term) {
+            searchTermsData = parsedData as SearchTerm[];
+            setLevel2Loaded(true);
+          }
+        }
+        
+        // Set whatever data we could extract
+        setSearchTerms(searchTermsData);
+        setNicheInsights(nicheInsightsData);
+        setProducts(productsData);
+        
+        if (searchTermsData.length > 0 || nicheInsightsData.length > 0 || productsData.length > 0) {
+          toast({
+            title: "File loaded",
+            description: `${file.original_filename} loaded with limited data.`,
+          });
+        } else {
+          throw new Error('Could not extract valid Niche Explorer data from this file');
+        }
+      }
+    } catch (err) {
+      console.error('Error loading file data:', err)
+      setFileError(err instanceof Error ? err.message : 'An error occurred loading the file data')
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: err instanceof Error ? err.message : 'Failed to load file data',
+      })
+    } finally {
+      setFileLoading(false)
+    }
+  }
+  
+  const handleFileListRefresh = () => {
+    setSelectedFileId(null)
+    setSearchTerms([])
+    setNicheInsights([])
+    setProducts([])
+    setClusters([])
+    setLevel2Loaded(false)
+  }
+
   const handleLevel2Success = (data: Level2UploadResponseData) => {
     setSearchTerms(data.searchTerms || []);
     setNicheInsights(data.nicheInsights || []);
@@ -198,305 +306,249 @@ export default function NicheExplorer() {
 
       setSummary(result.data?.summary ?? "No summary content received.");
     } catch (error) {
-      setSummaryError((error as Error).message || "An error occurred");
+      console.error("Error generating summary:", error);
+      setSummaryError(error instanceof Error ? error.message : String(error));
     } finally {
       setIsGeneratingSummary(false);
     }
-  }
+  };
 
   return (
-    <main className="container mx-auto py-10 px-4">
-      <div className="flex flex-col items-center justify-center space-y-6 text-center mb-10">
-        <h1 className="text-4xl font-bold tracking-tight">Niche Explorer</h1>
-        <p className="text-xl text-muted-foreground max-w-2xl">
-          {selectedNiche
-            ? `Analyzing trend clusters for "${selectedNiche}"`
-            : "Analyze trend clusters and generate insights for your selected niche"}
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 gap-8 mb-10">
-        {!selectedProjectId ? (
-          <Card className="mb-10">
+    <div className="container py-8">
+      <h1 className="text-3xl font-bold mb-6 text-center">Niche Explorer</h1>
+      
+      {!selectedProjectId ? (
+        <Alert variant="destructive" className="mb-6">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>No Project Selected</AlertTitle>
+          <AlertDescription>
+            Please select or create a project on the home page before uploading files.
+          </AlertDescription>
+        </Alert>
+      ) : (
+        <>
+          {/* Project Files */}
+          <div className="mb-8">
+            <FileList
+              projectId={selectedProjectId}
+              onRefresh={handleFileListRefresh}
+              onFileSelect={handleFileSelect}
+              selectedFileId={selectedFileId}
+            />
+          </div>
+          
+          {/* Loading indicator */}
+          {fileLoading && (
+            <div className="flex justify-center items-center p-8">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <span className="ml-2">Loading file data...</span>
+            </div>
+          )}
+          
+          {/* Error display */}
+          {fileError && (
+            <Alert variant="destructive" className="mb-6">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Error Loading File</AlertTitle>
+              <AlertDescription>{fileError}</AlertDescription>
+            </Alert>
+          )}
+          
+          {/* Upload component */}
+          <Card className="mb-6">
             <CardHeader>
-              <CardTitle>Select or Create a Project</CardTitle>
-              <CardDescription>Please create or select a project on the home page before uploading files.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button onClick={() => router.push('/')}>Go to Home</Button>
-            </CardContent>
-          </Card>
-        ) : (
-          <Card>
-            <CardHeader>
-              <CardTitle>Upload Level 2 Data</CardTitle>
+              <CardTitle>Upload Niche Explorer Data</CardTitle>
               <CardDescription>
-                Upload your Excel (.xlsx, .xls) or CSV (.csv) file with Search Terms, Niche Insights, and Products data
-                <br/>
-                Uploading for Project ID: {selectedProjectId}
+                Upload a CSV file with search term data for your niche
               </CardDescription>
             </CardHeader>
             <CardContent>
               <Upload
+                accept=".csv,.xlsx,.xls"
+                maxSize={10}
                 endpoint="/api/upload/level2"
-                acceptedFileTypes={[".xlsx", ".xls", ".csv"]}
-                maxSize={5}
-                onSuccess={handleLevel2Success}
                 projectId={selectedProjectId}
                 level={2}
+                onSuccess={handleLevel2Success}
               />
             </CardContent>
           </Card>
-        )}
-      </div>
-
-      {level2Loaded && (
-        <Tabs defaultValue="clusters" className="mb-10">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="clusters">Trend Clusters</TabsTrigger>
-            <TabsTrigger value="search-terms">Search Terms</TabsTrigger>
-            <TabsTrigger value="insights">Niche Insights</TabsTrigger>
-            <TabsTrigger value="products">Products</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="clusters">
-            {clusters.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">
-                {clusters.map((cluster) => (
-                  <ClusterCard key={cluster.id} cluster={cluster} />
-                ))}
-              </div>
-            ) : (
-              <div className="text-center p-10 border rounded-lg border-dashed">
-                <p className="text-muted-foreground">No clusters generated from the search terms data</p>
-              </div>
-            )}
-
-            <div className="mt-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Insight Summary</CardTitle>
-                  <CardDescription>AI-generated summary of key trends and opportunities</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {summaryError ? (
-                    <Alert variant="destructive" className="mb-4">
-                      <AlertDescription>{summaryError}</AlertDescription>
-                    </Alert>
-                  ) : summary ? (
-                    <div className="p-6 border rounded-lg bg-muted/50 prose prose-sm max-w-none dark:prose-invert">
-                      {summary.split('\n').map((line, index) => (
-                        <p key={index}>{line || <br />}</p>
+          
+          {/* Analysis tabs */}
+          {level2Loaded && (
+            <Tabs defaultValue="clusters" className="mt-8">
+              <TabsList className="grid grid-cols-4 mb-4">
+                <TabsTrigger value="clusters">Clusters</TabsTrigger>
+                <TabsTrigger value="searchTerms">Search Terms</TabsTrigger>
+                <TabsTrigger value="insights">Insights</TabsTrigger>
+                <TabsTrigger value="products">Products</TabsTrigger>
+              </TabsList>
+              
+              {/* Clusters Tab */}
+              <TabsContent value="clusters" className="space-y-6">
+                {clusters.length > 0 ? (
+                  <>
+                    <div className="flex justify-between items-center mb-4">
+                      <h2 className="text-2xl font-bold">Key Clusters</h2>
+                      <Button onClick={handleGenerateSummary} disabled={isGeneratingSummary}>
+                        {isGeneratingSummary ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Generating...
+                          </>
+                        ) : (
+                          "Generate Summary"
+                        )}
+                      </Button>
+                    </div>
+                    
+                    {summaryError && (
+                      <Alert variant="destructive" className="mb-4">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>Error generating summary</AlertTitle>
+                        <AlertDescription>{summaryError}</AlertDescription>
+                      </Alert>
+                    )}
+                    
+                    {summary && (
+                      <Card className="mb-6">
+                        <CardHeader>
+                          <CardTitle>Niche Summary</CardTitle>
+                        </CardHeader>
+                        <CardContent className="prose prose-slate dark:prose-invert max-w-none">
+                          <div dangerouslySetInnerHTML={{ __html: summary }} />
+                        </CardContent>
+                      </Card>
+                    )}
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {clusters.map((cluster) => (
+                        <ClusterCard key={cluster.id} cluster={cluster} />
                       ))}
                     </div>
-                  ) : (
-                    <div className="p-6 border rounded-lg bg-muted/50 text-center">
-                      <p className="text-muted-foreground italic">
-                        Click "Generate Summary" to get AI-powered insights based on the clusters above.
-                      </p>
-                    </div>
-                  )}
-                  <div className="mt-4 flex justify-end">
-                    <Button onClick={handleGenerateSummary} disabled={clusters.length === 0 || isGeneratingSummary}>
-                      {isGeneratingSummary ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Generating...
-                        </>
-                      ) : (
-                        "Generate Summary"
-                      )}
-                    </Button>
+                  </>
+                ) : (
+                  <div className="text-center p-8 text-muted-foreground">
+                    No cluster data available in the uploaded file.
                   </div>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="search-terms">
-            <Card>
-              <CardHeader>
-                <CardTitle>Search Terms</CardTitle>
-                <CardDescription>Search terms related to this niche (from uploaded data)</CardDescription>
-              </CardHeader>
-              <CardContent>
+                )}
+              </TabsContent>
+              
+              {/* Search Terms Tab */}
+              <TabsContent value="searchTerms">
                 {searchTerms.length > 0 ? (
-                  <div className="overflow-x-auto">
+                  <div className="rounded-md border">
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Search Term</TableHead>
-                          <TableHead
-                            className="text-right cursor-pointer"
-                            onClick={() => handleSort("Volume")}
-                          >
+                          <TableHead className="cursor-pointer" onClick={() => handleSort("Search_Term")}>
+                            Search Term
+                          </TableHead>
+                          <TableHead className="text-right cursor-pointer" onClick={() => handleSort("Volume")}>
                             Volume
-                            {sortConfig?.key === "Volume" ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ''}
                           </TableHead>
-                          <TableHead
-                            className="text-right cursor-pointer"
-                            onClick={() => handleSort("Growth_90")}
-                          >
-                            Growth (90d)
-                            {sortConfig?.key === "Growth_90" ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ''}
+                          <TableHead className="text-right cursor-pointer" onClick={() => handleSort("Growth_180")}>
+                            Growth 180d
                           </TableHead>
-                          <TableHead
-                            className="text-right cursor-pointer"
-                            onClick={() => handleSort("Growth_180")}
-                          >
-                            Growth (180d)
-                            {sortConfig?.key === "Growth_180" ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ''}
+                          <TableHead className="text-right cursor-pointer" onClick={() => handleSort("Growth_90")}>
+                            Growth 90d
                           </TableHead>
-                          <TableHead
-                            className="text-right cursor-pointer"
-                            onClick={() => handleSort("Click_Share")}
-                          >
+                          <TableHead className="text-right cursor-pointer" onClick={() => handleSort("Click_Share")}>
                             Click Share
-                            {sortConfig?.key === "Click_Share" ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ''}
                           </TableHead>
-                          <TableHead
-                            className="text-right cursor-pointer"
-                            onClick={() => handleSort("Conversion_Rate")}
-                          >
-                            Conversion Rate
-                            {sortConfig?.key === "Conversion_Rate" ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ''}
+                          <TableHead className="text-right cursor-pointer" onClick={() => handleSort("Conversion_Rate")}>
+                            Conv. Rate
                           </TableHead>
-                          <TableHead>Top Product 1</TableHead>
-                          <TableHead>Top Product 2</TableHead>
-                          <TableHead>Top Product 3</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {sortedSearchTerms.map((term, index) => (
-                          <TableRow key={index}>
-                            <TableCell className="font-medium">{term.Search_Term}</TableCell>
-                            <TableCell className="text-right">{term.Volume?.toLocaleString() ?? 'N/A'}</TableCell>
-                            <TableCell className="text-right">
-                              {renderGrowthBadge(term.Growth_90)}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {renderGrowthBadge(term.Growth_180)}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {formatPercentage(term.Click_Share)}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {formatPercentage(term.Conversion_Rate)}
-                            </TableCell>
-                            <TableCell className="text-xs truncate max-w-xs">{term.Top_Clicked_Product_1_Title ?? 'N/A'}</TableCell>
-                            <TableCell className="text-xs truncate max-w-xs">{term.Top_Clicked_Product_2_Title ?? 'N/A'}</TableCell>
-                            <TableCell className="text-xs truncate max-w-xs">{term.Top_Clicked_Product_3_Title ?? 'N/A'}</TableCell>
+                        {sortedSearchTerms.map((term, i) => (
+                          <TableRow key={i}>
+                            <TableCell>{term.Search_Term}</TableCell>
+                            <TableCell className="text-right">{term.Volume?.toLocaleString() || "0"}</TableCell>
+                            <TableCell className="text-right">{term.Growth_180 !== undefined ? renderGrowthBadge(term.Growth_180) : "N/A"}</TableCell>
+                            <TableCell className="text-right">{term.Growth_90 !== undefined ? renderGrowthBadge(term.Growth_90) : "N/A"}</TableCell>
+                            <TableCell className="text-right">{formatPercentage(term.Click_Share)}</TableCell>
+                            <TableCell className="text-right">{formatPercentage(term.Conversion_Rate)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
                     </Table>
                   </div>
                 ) : (
-                  <div className="text-center p-10 border rounded-lg border-dashed">
-                    <p className="text-muted-foreground">No search terms data available in the uploaded file.</p>
+                  <div className="text-center p-8 text-muted-foreground">
+                    No search terms data available in the uploaded file.
                   </div>
                 )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="insights">
-            <Card>
-              <CardHeader>
-                <CardTitle>Niche Insights</CardTitle>
-                <CardDescription>Key insights about this niche</CardDescription>
-              </CardHeader>
-              <CardContent>
+              </TabsContent>
+              
+              {/* Insights Tab */}
+              <TabsContent value="insights">
                 {nicheInsights.length > 0 ? (
-                  <div className="overflow-x-auto">
+                  <div className="rounded-md border">
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead>Category</TableHead>
                           <TableHead>Insight</TableHead>
-                          <TableHead>Relevance Score</TableHead>
                           <TableHead>Supporting Keywords</TableHead>
+                          <TableHead className="text-right">Relevance Score</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {nicheInsights.map((insight, index) => (
-                          <TableRow key={index}>
-                            <TableCell>{insight.Insight_Category}</TableCell>
-                            <TableCell>{insight.Insight}</TableCell>
+                        {nicheInsights.map((insight, i) => (
+                          <TableRow key={i}>
                             <TableCell>
-                              {insight.Relevance_Score !== undefined ? (
-                                <Badge variant="outline">{insight.Relevance_Score}/100</Badge>
-                              ) : (
-                                "N/A"
-                              )}
+                              <Badge variant="outline">{insight.Insight_Category || "Uncategorized"}</Badge>
                             </TableCell>
+                            <TableCell>{insight.Insight}</TableCell>
                             <TableCell>{insight.Supporting_Keywords || "N/A"}</TableCell>
+                            <TableCell className="text-right">{insight.Relevance_Score?.toFixed(2) || "N/A"}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
                     </Table>
                   </div>
                 ) : (
-                  <div className="text-center p-10 border rounded-lg border-dashed">
-                    <p className="text-muted-foreground">No niche insights data available</p>
+                  <div className="text-center p-8 text-muted-foreground">
+                    No insights data available in the uploaded file.
                   </div>
                 )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="products">
-            <Card>
-              <CardHeader>
-                <CardTitle>Products</CardTitle>
-                <CardDescription>Top products in this niche</CardDescription>
-              </CardHeader>
-              <CardContent>
+              </TabsContent>
+              
+              {/* Products Tab */}
+              <TabsContent value="products">
                 {products.length > 0 ? (
-                  <div className="overflow-x-auto">
+                  <div className="rounded-md border">
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Product Name</TableHead>
+                          <TableHead>Product</TableHead>
                           <TableHead>Brand</TableHead>
-                          <TableHead>ASIN</TableHead>
-                          <TableHead>Price</TableHead>
-                          <TableHead>Rating</TableHead>
-                          <TableHead>Reviews</TableHead>
-                          <TableHead>Click Share</TableHead>
-                          <TableHead>Niche Click Count</TableHead>
-                          <TableHead>BSR</TableHead>
-                          <TableHead>Action</TableHead>
+                          <TableHead className="text-right">Price</TableHead>
+                          <TableHead className="text-right">Rating</TableHead>
+                          <TableHead className="text-right">Reviews</TableHead>
+                          <TableHead className="text-right">Market Share</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {products.map((product, index) => (
-                          <TableRow key={index}>
+                        {products.map((product, i) => (
+                          <TableRow key={i}>
                             <TableCell>{product.Product_Name}</TableCell>
                             <TableCell>{product.Brand || "N/A"}</TableCell>
-                            <TableCell>{product.ASIN || "N/A"}</TableCell>
-                            <TableCell>
-                              {product.Price !== undefined ? `$${product.Price.toFixed(2)}` : "N/A"}
-                            </TableCell>
-                            <TableCell>
-                              {product.Rating !== undefined ? `${product.Rating.toFixed(1)}/5` : "N/A"}
-                            </TableCell>
-                            <TableCell>
-                              {product.Review_Count !== undefined ? product.Review_Count.toLocaleString() : "N/A"}
-                            </TableCell>
-                            <TableCell>
-                              {formatPercentage(product.Click_Share)}
-                            </TableCell>
-                            <TableCell>
-                              {product.Niche_Click_Count !== undefined
-                                ? product.Niche_Click_Count.toLocaleString()
-                                : "N/A"}
-                            </TableCell>
-                            <TableCell>{product.BSR !== undefined ? product.BSR.toLocaleString() : "N/A"}</TableCell>
-                            <TableCell>
+                            <TableCell className="text-right">${product.Price?.toFixed(2) || "N/A"}</TableCell>
+                            <TableCell className="text-right">{product.Rating?.toFixed(1) || "N/A"}</TableCell>
+                            <TableCell className="text-right">{product.Review_Count?.toLocaleString() || "N/A"}</TableCell>
+                            <TableCell className="text-right">{formatPercentage(product.Market_Share)}</TableCell>
+                            <TableCell className="text-right">
                               {product.ASIN && (
-                                <Button size="sm" variant="outline" onClick={() => handleSelectProduct(product.ASIN!)}>
-                                  View Keywords
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  onClick={() => handleSelectProduct(product.ASIN)}
+                                >
+                                  Analyze
                                 </Button>
                               )}
                             </TableCell>
@@ -506,24 +558,15 @@ export default function NicheExplorer() {
                     </Table>
                   </div>
                 ) : (
-                  <div className="text-center p-10 border rounded-lg border-dashed">
-                    <p className="text-muted-foreground">No product data available</p>
+                  <div className="text-center p-8 text-muted-foreground">
+                    No product data available in the uploaded file.
                   </div>
                 )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+              </TabsContent>
+            </Tabs>
+          )}
+        </>
       )}
-
-      <div className="mt-8 flex justify-center space-x-4">
-        <Button variant="outline" onClick={() => window.location.href = "/"}>
-          Back to Home
-        </Button>
-        <Button variant="outline" onClick={() => window.location.href = "/product-keywords"}>
-          Go to Product Keywords
-        </Button>
-      </div>
-    </main>
+    </div>
   )
 }

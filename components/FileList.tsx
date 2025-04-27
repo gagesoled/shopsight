@@ -8,7 +8,7 @@ import { FileIcon, Trash2, RefreshCw } from "lucide-react"
 import { formatDistanceToNow } from 'date-fns'
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
-interface File {
+interface ProjectFile {
   id: string
   project_id: string
   level: number
@@ -20,10 +20,12 @@ interface File {
 interface FileListProps {
   projectId: string | null
   onRefresh?: () => void
+  onFileSelect?: (file: ProjectFile) => void
+  selectedFileId?: string | null
 }
 
-export function FileList({ projectId, onRefresh }: FileListProps) {
-  const [files, setFiles] = useState<File[]>([])
+export function FileList({ projectId, onRefresh, onFileSelect, selectedFileId }: FileListProps) {
+  const [files, setFiles] = useState<ProjectFile[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [retryCount, setRetryCount] = useState(0)
@@ -178,7 +180,11 @@ export function FileList({ projectId, onRefresh }: FileListProps) {
             </TableHeader>
             <TableBody>
               {files.map(file => (
-                <TableRow key={file.id}>
+                <TableRow 
+                  key={file.id}
+                  className={`cursor-pointer hover:bg-muted/50 ${file.id === selectedFileId ? 'bg-muted' : ''}`}
+                  onClick={() => onFileSelect && onFileSelect(file)}
+                >
                   <TableCell className="flex items-center gap-2">
                     <FileIcon className="h-4 w-4" />
                     {file.original_filename}
@@ -189,13 +195,30 @@ export function FileList({ projectId, onRefresh }: FileListProps) {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    {formatDistanceToNow(new Date(file.created_at), { addSuffix: true })}
+                    {file.created_at ? (
+                      (() => {
+                        try {
+                          const date = new Date(file.created_at);
+                          // Check if date is valid
+                          if (isNaN(date.getTime())) {
+                            return "Invalid date";
+                          }
+                          return formatDistanceToNow(date, { addSuffix: true });
+                        } catch (error) {
+                          console.error("Date formatting error:", error);
+                          return "Invalid date";
+                        }
+                      })()
+                    ) : "N/A"}
                   </TableCell>
                   <TableCell className="text-right">
                     <Button 
                       variant="ghost" 
                       size="icon"
-                      onClick={() => deleteFile(file.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteFile(file.id);
+                      }}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>

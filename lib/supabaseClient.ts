@@ -1,36 +1,75 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 // Prioritize regular env vars, then fallback to NEXT_PUBLIC ones if available
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY
 
+// Debug environment variables (don't log full keys in production)
+console.log('Debug Supabase configuration:');
+console.log('URL defined:', !!supabaseUrl);
+console.log('Service Role Key defined:', !!supabaseServiceRoleKey);
+console.log('Available env keys:', Object.keys(process.env)
+  .filter(key => key.includes('SUPABASE') || key.includes('NEXT_PUBLIC_SUPABASE'))
+  .join(', '));
+
+// More robust environment variable checking
 if (!supabaseUrl) {
-  console.error('Missing Supabase URL environment variable');
-  console.error('Available env vars:', Object.keys(process.env).filter(key => key.includes('SUPABASE')));
-  throw new Error('Missing Supabase URL environment variable')
+  throw new Error('Missing Supabase URL environment variable. Please check your .env.local file has NEXT_PUBLIC_SUPABASE_URL defined correctly.');
 }
 
 if (!supabaseServiceRoleKey) {
-  console.error('Missing Supabase Service Role Key environment variable');
-  console.error('Available env vars:', Object.keys(process.env).filter(key => key.includes('SUPABASE')));
-  throw new Error('Missing Supabase Service Role Key environment variable')
+  throw new Error('Missing Supabase Service Role Key environment variable. Please check your .env.local file has SUPABASE_SERVICE_ROLE_KEY defined correctly.');
 }
+
+// Initialize with null, but provide the type annotation
+let supabaseAdmin: SupabaseClient | null = null;
 
 // Create a single supabase client for interacting with your database
 // Note: Using the service_role key bypasses RLS. Be mindful of security
 // if you intend to use this client in contexts requiring user-specific permissions.
 // For API routes performing admin-like tasks, this is often necessary.
-export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
+try {
+  console.log(`Initializing Supabase Admin Client with URL: ${supabaseUrl.substring(0, 20)}...`);
+  
+  supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
     auth: {
-        // Automatically handle refreshing sessions if needed (though less relevant for service role)
-        autoRefreshToken: true,
-        persistSession: false,
-        // Detect session automatically from cookies - less relevant for service key but good practice
-        detectSessionInUrl: false
+      autoRefreshToken: true,
+      persistSession: false,
+      detectSessionInUrl: false
     }
-})
+  });
 
-console.log("Supabase Admin Client Initialized with URL:", supabaseUrl); // Add log for confirmation
+  console.log("Supabase Admin Client initialized successfully");
+  
+  // Test the connection in the background
+  (async () => {
+    try {
+      console.log("Testing Supabase connection...");
+      const { data, error, status } = await supabaseAdmin
+        .from('projects')
+        .select('count', { count: 'exact', head: true });
+      
+      if (error) {
+        console.error("Error testing Supabase connection:", error);
+        console.error("Response status:", status);
+        if (status === 404) {
+          console.error("Table 'projects' might not exist. Make sure your database schema is set up correctly.");
+        }
+      } else {
+        console.log(`Supabase connection test successful - Projects table available`);
+      }
+    } catch (err) {
+      console.error("Failed to test Supabase connection:", err);
+    }
+  })();
+    
+} catch (error) {
+  console.error("Failed to initialize Supabase client:", error);
+  throw new Error(`Supabase client initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+}
+
+// Export the initialized client
+export { supabaseAdmin };
 
 // Optional: You might create a separate client for frontend use later
 // using the anon key if you need RLS based on user sessions.

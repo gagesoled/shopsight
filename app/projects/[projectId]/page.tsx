@@ -22,7 +22,7 @@ interface Project {
   created_at: string
 }
 
-interface File {
+interface ProjectFile {
   id: string
   project_id: string
   level: number
@@ -40,7 +40,7 @@ export default function ProjectWorkspace() {
   const projectId = params.projectId as string
   
   const [project, setProject] = useState<Project | null>(null)
-  const [files, setFiles] = useState<File[]>([])
+  const [files, setFiles] = useState<ProjectFile[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [fileUploading, setFileUploading] = useState(false)
@@ -103,7 +103,7 @@ export default function ProjectWorkspace() {
   }
   
   // File upload handler
-  const handleFileUpload = async (file: File) => {
+  const handleFileUpload = async (file: globalThis.File) => {
     if (!projectId) {
       toast({
         variant: "destructive",
@@ -224,7 +224,19 @@ export default function ProjectWorkspace() {
         <div className="mb-6">
           <h1 className="text-3xl font-bold">{project.name}</h1>
           <p className="text-muted-foreground">
-            Created {formatDistanceToNow(new Date(project.created_at), { addSuffix: true })}
+            Created {(() => {
+              try {
+                const date = new Date(project.created_at);
+                // Check if date is valid
+                if (isNaN(date.getTime())) {
+                  return "Invalid date";
+                }
+                return formatDistanceToNow(date, { addSuffix: true });
+              } catch (error) {
+                console.error("Date formatting error:", error);
+                return "Invalid date";
+              }
+            })()}
           </p>
         </div>
       ) : null}

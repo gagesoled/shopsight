@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { processLevel1Data } from "@/lib/analysis/market-opportunity"
 import { Level1BubbleChart } from "./BubbleChart"
 import { Upload } from "@/components/upload"
@@ -53,10 +53,12 @@ interface ProcessedLevel1Data {
 }
 
 interface Level1AnalysisProps {
-  projectId: string
+  projectId: string | null
+  initialData?: any[] | null
+  selectedFileId?: string | null
 }
 
-export default function Level1Analysis({ projectId }: Level1AnalysisProps) {
+export default function Level1Analysis({ projectId, initialData, selectedFileId }: Level1AnalysisProps) {
   const [rawData, setRawData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -77,14 +79,80 @@ export default function Level1Analysis({ projectId }: Level1AnalysisProps) {
   
   const { toast } = useToast()
   
+  // Use initialData if provided
+  useEffect(() => {
+    if (initialData && initialData.length > 0) {
+      console.log(`Setting raw data from initialData: ${initialData.length} records`);
+      setRawData(initialData);
+      setUploadSuccess(true);
+      setError(null);
+    } else if (selectedFileId) {
+      // If a file is selected but no data is provided, reset the view
+      setRawData([]);
+      setUploadSuccess(false);
+    }
+  }, [initialData, selectedFileId]);
+  
   // Process the raw CSV data using our utility functions
   const processedData = useMemo<ProcessedLevel1Data[]>(() => {
-    if (!rawData || rawData.length === 0) return []
-    return processLevel1Data(rawData)
-  }, [rawData])
+    if (!rawData || rawData.length === 0) {
+      console.log("No rawData to process for Level 1 Analysis display");
+      return [];
+    }
+    console.log(`Processing ${rawData.length} records for Level 1 Analysis display`);
+    try {
+      // Debug the raw data to see its structure
+      console.log("Raw data sample:", rawData.slice(0, 1));
+      
+      // Check if the data needs to be transformed
+      let dataToProcess = rawData;
+      
+      // Handle potential unexpected data structures
+      if (rawData.length > 0) {
+        const firstItem = rawData[0];
+        
+        // Log all keys to help with debugging
+        console.log("Available keys in data:", Object.keys(firstItem));
+        
+        // Check if the data is in an unexpected format and try to normalize it
+        if (firstItem && typeof firstItem === 'object') {
+          // For common field naming issues, try to map them
+          dataToProcess = rawData.map(item => {
+            const normalizedItem: any = { ...item };
+            
+            // Map commonly misnamed fields
+            if (item.CustomerNeed && !item.Customer_Need) {
+              normalizedItem.Customer_Need = item.CustomerNeed;
+            }
+            if (item.SearchVolume && !item.Search_Volume) {
+              normalizedItem.Search_Volume = item.SearchVolume;
+            }
+            if (item.SearchVolumeGrowth && !item.Search_Volume_Growth_180) {
+              normalizedItem.Search_Volume_Growth_180 = item.SearchVolumeGrowth;
+            }
+            
+            return normalizedItem;
+          });
+        }
+      }
+      
+      const processed = processLevel1Data(dataToProcess);
+      console.log(`Successfully processed ${processed.length} level 1 records`);
+      return processed;
+    } catch (err) {
+      console.error("Error processing Level 1 data:", err);
+      setError(err instanceof Error ? err.message : "Failed to process data");
+      return [];
+    }
+  }, [rawData]);
   
   // Apply filters to the processed data
   const filteredData = useMemo(() => {
+    if (!processedData || processedData.length === 0) {
+      console.log("No processed data to filter");
+      return [];
+    }
+    console.log(`Filtering ${processedData.length} processed records`);
     return processedData.filter(item => {
       // Filter out seasonal items if not showing them
       if (!filterConfig.showSeasonal && item.flags.isSeasonal) return false
@@ -97,95 +165,132 @@ export default function Level1Analysis({ projectId }: Level1AnalysisProps) {
       
       return true
     })
-  }, [processedData, filterConfig])
+  }, [processedData, filterConfig]);
   
   // Apply sorting to the filtered data
   const sortedData = useMemo(() => {
-    const sorted = [...filteredData]
+    if (!filteredData || filteredData.length === 0) {
+      console.log("No filtered data to sort");
+      return [];
+    }
+    console.log(`Sorting ${filteredData.length} filtered records`);
+
+    const sorted = [...filteredData];
     
     // Handle nested property access for sorting
     const getSortValue = (item: ProcessedLevel1Data, path: string) => {
-      return path.split('.').reduce((obj, key) => obj[key], item as any)
+      try {
+        // Basic nested access, consider a more robust library like lodash.get if needed
+        return path.split('.').reduce((obj, key) => obj && obj[key], item as any);
+      } catch (e) {
+        console.error(`Error getting sort value for path ${path}`, e);
+        return undefined; // Return undefined on error
+      }
     }
     
     sorted.sort((a, b) => {
-      const aValue = getSortValue(a, sortConfig.key)
-      const bValue = getSortValue(b, sortConfig.key)
+      const aValue = getSortValue(a, sortConfig.key);
+      const bValue = getSortValue(b, sortConfig.key);
       
+      // Handle undefined values during sort
+      if (aValue === undefined || aValue === null) return 1; // Move nulls/undefined to the end
+      if (bValue === undefined || bValue === null) return -1;
+
       if (aValue < bValue) {
-        return sortConfig.direction === 'asc' ? -1 : 1
+        return sortConfig.direction === 'asc' ? -1 : 1;
       }
       if (aValue > bValue) {
-        return sortConfig.direction === 'asc' ? 1 : -1
+        return sortConfig.direction === 'asc' ? 1 : -1;
       }
-      return 0
-    })
+      return 0;
+    });
     
-    return sorted
-  }, [filteredData, sortConfig])
+    return sorted;
+  }, [filteredData, sortConfig]);
   
   // Event handlers
   const handleFileUpload = async (file: File) => {
-    setLoading(true)
-    setError(null)
-    setUploadSuccess(false)
-    
+    setLoading(true);
+    setError(null);
+    setRawData([]); // Clear previous data immediately
+    setUploadSuccess(false);
+
+    let parsedFileData: any[] | null = null;
+    let parsedOriginalFilename: string | null = null;
+    let parsedVersion: string | null = null;
+
     try {
-      // Parse the file using our utility
-      const parsedFile = await parseFile(file, 1)
-      
-      if (!parsedFile.data || parsedFile.data.length === 0) {
-        throw new Error("No data found in the file")
+      // --- Stage 1: Parse the file locally ---
+      console.log("Parsing Level 1 file locally...");
+      const parsedResult = await parseFile(file, 1); // Use the specific parser
+      if (!parsedResult.data || parsedResult.data.length === 0) {
+        throw new Error("No valid Level 1 data found after parsing.");
       }
-      
-      // Set the raw data for processing
-      setRawData(parsedFile.data)
-      
-      // Send the parsed data to the API
+      parsedFileData = parsedResult.data;
+      parsedOriginalFilename = parsedResult.originalFilename;
+      parsedVersion = parsedResult.parserVersion;
+      console.log(`Local parsing successful: ${parsedResult.data.length} records found.`);
+
+      // --- Stage 2: Upload parsed data to backend/Supabase ---
+      if (!projectId) {
+        throw new Error("No project selected for upload.");
+      }
+      console.log(`Uploading parsed data for project ${projectId}...`);
+
       const response = await fetch('/api/files/upload', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_id: projectId,
-          level: 1,
-          original_filename: parsedFile.originalFilename,
-          parsed_json: parsedFile.data,
-          parser_version: parsedFile.parserVersion
+          level: 1, // Explicitly set level to 1
+          original_filename: parsedOriginalFilename,
+          parsed_json: parsedFileData, // Send the actual parsed data
+          parser_version: parsedVersion
         })
-      })
-      
+      });
+
+      let result;
+      try {
+        result = await response.json(); // Always try to parse JSON
+      } catch (jsonError) {
+        console.error("Error parsing JSON response:", jsonError);
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
+
       if (!response.ok) {
-        throw new Error(`Server error: ${response.status} ${response.statusText}`)
+        const errorMsg = result?.message || result?.error || `Server error: ${response.status} ${response.statusText}`;
+        throw new Error(errorMsg);
       }
-      
-      const result = await response.json()
-      
+
       if (!result.success) {
-        throw new Error(result.message || 'Failed to upload file')
+        throw new Error(result.message || 'Failed to save file data via API.');
       }
-      
-      // Show success message
+
+      // --- Stage 3: Update UI state ONLY after successful save ---
+      console.log("API upload successful. Updating UI state with parsed data.");
+      // Ensure we're not setting null to state
+      setRawData(parsedFileData || []);
+      setUploadSuccess(true);
       toast({
         title: "Upload successful",
-        description: `File "${parsedFile.originalFilename}" has been uploaded and processed.`,
-      })
-      
-      setUploadSuccess(true)
+        description: `File "${parsedOriginalFilename}" has been uploaded, saved, and is ready for analysis.`,
+      });
+      // Optionally trigger a refresh of the FileList if needed (e.g., via parent component or context)
+
     } catch (err) {
-      console.error("File processing error:", err)
-      setError(err instanceof Error ? err.message : "Failed to process data. Please check the format.")
-      
+      console.error("File processing/upload error:", err);
+      const errorMsg = err instanceof Error ? err.message : "Failed to process or upload file.";
+      setError(errorMsg);
+      setRawData([]); // Clear data on error
       toast({
         variant: "destructive",
         title: "Upload failed",
-        description: err instanceof Error ? err.message : "Failed to process data",
-      })
+        description: errorMsg,
+      });
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
   
   const handleSort = (key: string) => {
     setSortConfig(prev => ({
@@ -195,15 +300,18 @@ export default function Level1Analysis({ projectId }: Level1AnalysisProps) {
   }
   
   // Helper functions for UI
-  const formatGrowth = (value: number) => {
+  const formatGrowth = (value: number | null | undefined) => {
+    if (value === undefined || value === null || isNaN(value)) return "N/A";
     return `${(value * 100).toFixed(1)}%`
   }
   
-  const formatNumber = (value: number) => {
+  const formatNumber = (value: number | null | undefined) => {
+    if (value === undefined || value === null || isNaN(value)) return "N/A";
     return value.toLocaleString()
   }
   
-  const formatPrice = (value: number) => {
+  const formatPrice = (value: number | null | undefined) => {
+    if (value === undefined || value === null || isNaN(value)) return "N/A";
     return `$${value.toFixed(2)}`
   }
   
@@ -213,7 +321,7 @@ export default function Level1Analysis({ projectId }: Level1AnalysisProps) {
     
     return filteredData.reduce((acc, item) => {
       Object.entries(item.metrics).forEach(([key, value]) => {
-        if (typeof value === 'number') {
+        if (typeof value === 'number' && !isNaN(value)) { // Added NaN check
           if (!acc[key] || value > acc[key]) {
             acc[key] = value
           }
@@ -221,7 +329,7 @@ export default function Level1Analysis({ projectId }: Level1AnalysisProps) {
       })
       
       Object.entries(item.scores).forEach(([key, value]) => {
-        if (typeof value === 'number') {
+        if (typeof value === 'number' && !isNaN(value)) { // Added NaN check
           if (!acc[key] || value > acc[key]) {
             acc[key] = value
           }
@@ -233,7 +341,8 @@ export default function Level1Analysis({ projectId }: Level1AnalysisProps) {
   }, [filteredData])
   
   // Function to determine if a cell should be highlighted
-  const shouldHighlight = (key: string, value: number) => {
+  const shouldHighlight = (key: string, value: number | null | undefined) => {
+    if (value === null || value === undefined || isNaN(value)) return false; // Don't highlight N/A
     if (!maxValues[key]) return false
     const threshold = 0.7 // Highlight values that are at least 70% of the max
     return value >= maxValues[key] * threshold
@@ -256,13 +365,19 @@ export default function Level1Analysis({ projectId }: Level1AnalysisProps) {
   // Get aggregate metrics for the dashboard
   const aggregateMetrics = useMemo(() => {
     if (filteredData.length === 0) return null
-    
-    const totalSearchVolume = filteredData.reduce((sum, item) => sum + item.metrics.searchVolume, 0)
-    const avgGrowth = filteredData.reduce((sum, item) => sum + item.metrics.searchVolumeGrowth, 0) / filteredData.length
-    const avgOpportunityScore = filteredData.reduce((sum, item) => sum + item.scores.opportunity, 0) / filteredData.length
-    const emergingCount = filteredData.filter(item => item.flags.isEmerging).length
-    const seasonalCount = filteredData.filter(item => item.flags.isSeasonal).length
-    
+
+    const totalSearchVolume = filteredData.reduce((sum, item) => sum + (item.metrics.searchVolume ?? 0), 0); // Handle potential null/undefined
+    const validGrowthItems = filteredData.filter(item => item.metrics.searchVolumeGrowth !== undefined && !isNaN(item.metrics.searchVolumeGrowth));
+    const avgGrowth = validGrowthItems.length > 0
+        ? validGrowthItems.reduce((sum, item) => sum + item.metrics.searchVolumeGrowth!, 0) / validGrowthItems.length // Use non-null assertion after filtering
+        : 0;
+    const validOppScoreItems = filteredData.filter(item => item.scores.opportunity !== undefined && !isNaN(item.scores.opportunity));
+    const avgOpportunityScore = validOppScoreItems.length > 0
+        ? validOppScoreItems.reduce((sum, item) => sum + item.scores.opportunity!, 0) / validOppScoreItems.length // Use non-null assertion
+        : 0;
+    const emergingCount = filteredData.filter(item => item.flags.isEmerging).length;
+    const seasonalCount = filteredData.filter(item => item.flags.isSeasonal).length;
+
     return {
       totalSearchVolume,
       avgGrowth,
