@@ -8,6 +8,8 @@ import type {
   ClusterResult,
   ProductClusterResult
 } from "@/lib/types";
+import { createSearchClusters } from "@/lib/analysis/search-clustering";
+import { OpenAI } from "openai";
 
 // Define the request body schema
 const ClusterRequestSchema = z.object({
@@ -305,72 +307,49 @@ function findCommonWords(wordArrays: string[][]): string[] {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    console.log("Request body:", body);
-
-    // Validate the request body
-    const validation = ClusterRequestSchema.safeParse(body);
-    if (!validation.success) {
-      console.error("Validation failed:", validation.error.format());
-      return NextResponse.json({ 
-        success: false, 
-        message: "Invalid input data", 
-        errors: validation.error.format() 
-      }, { status: 400 });
-    }
-
-    const { project_id, type, data, settings } = validation.data;
-
-    // Run clustering based on type
-    let results;
-    if (type === 'search_terms') {
-      results = clusterSearchTerms(data as Level2SearchTermData[], settings);
-    } else {
-      results = clusterProducts(data as Level2ProductData[], settings);
-    }
-
-    // Check if supabaseAdmin is initialized
-    if (!supabaseAdmin) {
-      console.error("Supabase admin client not initialized");
-      return NextResponse.json({ 
-        success: false, 
-        message: "Database connection error" 
-      }, { status: 500 });
-    }
-
-    // Store the results in the analysis_results table
-    const { error: storeError } = await supabaseAdmin
-      .from('analysis_results')
-      .upsert({
-        project_id,
-        type: type === 'search_terms' ? 'search_term_clusters' : 'product_clusters',
-        results,
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'project_id,type'
-      });
-
-    if (storeError) {
-      console.error("Error storing analysis results:", storeError);
-      return NextResponse.json({ 
-        success: false, 
-        message: "Failed to store analysis results", 
-        error: storeError.message 
-      }, { status: 500 });
-    }
-
-    return NextResponse.json({ 
-      success: true, 
-      message: "Clustering analysis completed successfully", 
-      data: results 
+    const validatedData = ClusterRequestSchema.parse(body);
+    
+    const { project_id, type, data, settings } = validatedData;
+    
+    // Initialize OpenAI client
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
     });
-
+    
+    if (type === 'search_terms') {
+      // Validate search term data structure
+      const searchTerms = data as Level2SearchTermData[];
+      
+      // Use AI-based clustering
+      const clusters = await createSearchClusters(searchTerms, openai);
+      
+      return NextResponse.json({
+        success: true,
+        data: clusters
+      });
+    } else if (type === 'products') {
+      // Validate product data structure
+      const products = data as Level2ProductData[];
+      
+      // Use product clustering
+      const clusters = clusterProducts(products, settings);
+      
+      return NextResponse.json({
+        success: true,
+        data: clusters
+      });
+    }
+    
+    return NextResponse.json({
+      success: false,
+      message: "Invalid cluster type"
+    }, { status: 400 });
+    
   } catch (error) {
-    console.error("Error in clustering analysis:", error);
-    const message = error instanceof Error ? error.message : "An unexpected error occurred";
-    return NextResponse.json({ 
-      success: false, 
-      message: "Failed to perform clustering analysis", 
-      error: message 
+    console.error("Error processing cluster request:", error);
+    return NextResponse.json({
+      success: false,
+      message: error instanceof Error ? error.message : "An error occurred"
     }, { status: 500 });
   }
 } 

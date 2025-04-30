@@ -446,154 +446,130 @@ async function analyzeMetadata(
   cluster: HierarchicalCluster,
   openai: OpenAI
 ): Promise<MetadataAnalysis> {
-  const terms = cluster.terms?.map((t: EmbeddingResult) => t.term) ?? [];
-  const metadata = cluster.terms?.map((t: EmbeddingResult) => t.metadata || {}) ?? [];
-
-  // Initialize default empty structures
-  const defaultPatterns = {
-    functionPatterns: [],
-    formatPatterns: [],
-    valuePatterns: []
-  };
-
-  const defaultRelationships = {
-    functionFormatPairs: [],
-    functionValuePairs: [],
-    formatValuePairs: []
-  };
-
-  // Extract patterns from metadata
-  const patterns = await extractMetadataPatterns(terms, metadata, openai) || defaultPatterns;
-
-  // Analyze relationships between different metadata types
-  const relationships = await analyzeMetadataRelationships(terms, metadata, openai) || defaultRelationships;
-
+  const terms = cluster.terms as EmbeddingResult[];
+  
+  // Extract patterns from terms
+  const patterns = await extractMetadataPatterns(terms, openai);
+  
+  // Analyze relationships between patterns
+  const relationships = await analyzeMetadataRelationships(terms, openai);
+  
   // Generate insights from patterns and relationships
-  const insights = await generateMetadataInsights(patterns, relationships, terms, openai);
-
+  const insights = await generateMetadataInsights(terms, openai);
+  
   return {
     patterns,
     relationships,
     insights
-  }
+  };
 }
 
-async function generateClusterMetadata(
+// Update function signatures to match expected types
+async function extractMetadataPatterns(terms: EmbeddingResult[], openai: OpenAI): Promise<MetadataAnalysis['patterns']> {
+  // Implementation will be added later
+  return {
+    functionPatterns: [],
+    formatPatterns: [],
+    valuePatterns: []
+  };
+}
+
+async function analyzeMetadataRelationships(terms: EmbeddingResult[], openai: OpenAI): Promise<MetadataAnalysis['relationships']> {
+  // Implementation will be added later
+  return {
+    functionFormatPairs: [],
+    functionValuePairs: [],
+    formatValuePairs: []
+  };
+}
+
+async function generateMetadataInsights(terms: EmbeddingResult[], openai: OpenAI): Promise<MetadataAnalysis['insights']> {
+  // Implementation will be added later
+  return [];
+}
+
+export async function generateClusterMetadata(
   terms: EmbeddingResult[],
   openai: OpenAI
 ): Promise<{ title: string; description: string; tags: Array<{ category: string; value: string; confidence?: number }> }> {
-  if (!terms || terms.length === 0) {
-    return { title: "Empty Cluster", description: "No terms provided.", tags: [] };
-  }
-
-  // Import tagging functions
-  const { parseTagOntology, applyTags } = await import("./tagging");
-  const { sampleTagOntology } = await import("../tagOntology");
-
-  const termStrings = terms.map(t => t.term).slice(0, 25); // Limit terms for prompt efficiency
-  const totalVolume = terms.reduce((sum, t) => sum + (t.volume || 0), 0);
-  const avgGrowth = terms.length > 0 ? terms.reduce((sum, t) => sum + (t.growth || 0), 0) / terms.length : 0;
-  const avgClickShare = terms.length > 0 ? terms.reduce((sum, t) => sum + (t.clickShare || 0), 0) / terms.length : 0;
-
-  // --- Apply Rule-Based Tagging ---
-  const ontologyTags = parseTagOntology(sampleTagOntology); // Load rules
-  const aggregatedRuleTags: Record<string, Record<string, number>> = {}; // { category: { value: count } }
-
-  terms.forEach(term => {
-    const applied = applyTags(term.term, ontologyTags);
-    Object.entries(applied).forEach(([category, values]) => {
-      if (!aggregatedRuleTags[category]) aggregatedRuleTags[category] = {};
-      values.forEach(value => {
-        aggregatedRuleTags[category][value] = (aggregatedRuleTags[category][value] || 0) + 1;
-      });
-    });
-  });
-
-  // Select top rule-based tags per category (e.g., top 2)
-  const topRuleTags: Array<{ category: string; value: string }> = [];
-  Object.entries(aggregatedRuleTags).forEach(([category, valueCounts]) => {
-    const sortedValues = Object.entries(valueCounts)
-      .sort(([, countA], [, countB]) => countB - countA)
-      .slice(0, 2); // Get top 2
-    sortedValues.forEach(([value]) => topRuleTags.push({ category, value }));
-  });
-
-  const ruleTagsString = topRuleTags.map(t => `${t.category}: ${t.value}`).join(', ');
-  console.log(`Aggregated Rule Tags for AI prompt: ${ruleTagsString}`);
-  // --- End Rule-Based Tagging ---
-
-  const prompt = `Analyze the following search term cluster representing user search behavior.
-
-    Cluster Metrics:
-    - Total Search Volume: ${totalVolume.toLocaleString()}
-    - Average Growth (180d): ${(avgGrowth * 100).toFixed(1)}%
-    - Average Click Share: ${(avgClickShare * 100).toFixed(1)}%
-
-Rule-Based Tags Found: ${ruleTagsString || 'None'}
-
-    Search Terms (sample): ${termStrings.join(", ")}
-    ${terms.length > 25 ? `(... and ${terms.length - 25} more)` : ''}
-
-Based on the terms, metrics, AND the rule-based tags provided, generate:
-    1. A concise, descriptive 'title' (max 10 words) summarizing the core user intent or theme.
-2. A brief 'description' (1-2 sentences) explaining the theme and user behavior, incorporating the rule-based tags.
-3. Refined/supplemented 'tags' (up to 7 total) based on the overall context, categorized under Format, Function, Values, Audience, Behavior. Ensure these tags are relevant and distinct. Assign a confidence score (0-1) for each tag you generate or refine.
-
-Return ONLY the JSON object:
-    {
-      "title": "string",
-      "description": "string",
-      "tags": [ {"category": "Format|Function|Values|Audience|Behavior", "value": "string", "confidence": number} ]
-    }`;
-
   try {
-    console.log(`Generating metadata for cluster with ${terms.length} terms. Sample: ${termStrings.slice(0, 3).join(', ')}`);
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o", // Using gpt-4o for better quality
+    // Prepare the terms data for the AI
+    const termsData = terms.map(t => ({
+      term: t.term,
+      volume: t.volume,
+      clickShare: t.clickShare || 0,
+      growth: t.growth || 0,
+      competition: t.competition || 0
+    }));
+
+    // Create a category-agnostic prompt
+    const prompt = `
+You are an expert at analyzing search term patterns and identifying meaningful clusters. Based *only* on the terms and metrics provided, generate:
+
+1. A concise, descriptive 'title' (max 5 words) that captures the core theme of these search terms.
+
+2. A detailed 'description' (2-3 sentences) explaining the cluster's focus and significance. Include relevant metrics and market insights.
+
+3. Generate specific tags by analyzing the terms for common patterns and characteristics. Consider aspects such as:
+- Product characteristics (material, size, style, etc.)
+- Usage context or purpose
+- Target audience or user group
+- Distinctive features or attributes
+- Brand names if prominently featured
+- Any other relevant categorization that emerges from the data
+
+Only include tags that are directly supported by the provided terms. For each tag, assign a confidence score (0.0-1.0) reflecting how strongly it's supported by the data.
+
+Terms and Metrics:
+${JSON.stringify(termsData, null, 2)}
+
+Return the result in this exact JSON format:
+{
+  "title": "string",
+  "description": "string",
+  "tags": [
+    {
+      "category": "string",
+      "value": "string",
+      "confidence": number
+    }
+  ]
+}`;
+
+    // Call the AI
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4-turbo",
       messages: [
-        { role: "system", content: "You are a helpful assistant skilled in analyzing search term data to identify user intent, behavioral patterns, and relevant product attributes based on keywords and pre-calculated tags. Provide responses ONLY in the requested JSON format." },
-        { role: "user", content: prompt },
+        {
+          role: "system",
+          content: "You are an expert at analyzing search patterns and identifying meaningful clusters. Focus only on the data provided, without any preconceived notions."
+        },
+        {
+          role: "user",
+          content: prompt
+        }
       ],
-      temperature: 0.3, // Lower temperature for more focused output
       response_format: { type: "json_object" }
     });
 
-    const responseContent = response.choices[0]?.message?.content || '{}';
+    const responseContent = completion.choices[0]?.message?.content;
+    if (!responseContent) {
+      throw new Error("No response from AI");
+    }
+
     const parsedResult = JSON.parse(responseContent);
-
-    // Validate and structure the result
-    const aiTags = (Array.isArray(parsedResult.tags) ? parsedResult.tags : [])
-      .filter((tag: any): tag is { category: string; value: string; confidence?: number } =>
-        typeof tag.category === 'string' && typeof tag.value === 'string')
-      .map((tag: { category: string; value: string; confidence?: number }) => ({
-        ...tag,
-        confidence: typeof tag.confidence === 'number' ? Math.max(0, Math.min(1, tag.confidence)) : 0.7 // Default confidence if missing
-      }));
-
-    console.log(`AI generated ${aiTags.length} tags.`);
-
-    // Combine rule-based tags (with default confidence) and AI tags (prefer AI tags if duplicate category/value exists)
-    const combinedTagsMap = new Map<string, { category: string; value: string; confidence?: number }>();
-    topRuleTags.forEach((tag: { category: string; value: string }) => 
-      combinedTagsMap.set(`${tag.category}:${tag.value}`, { ...tag, confidence: 0.6 })
-    ); // Lower confidence for rule-based
-    aiTags.forEach((tag: { category: string; value: string; confidence?: number }) => 
-      combinedTagsMap.set(`${tag.category}:${tag.value}`, tag)
-    ); // AI tags overwrite rule-based
-
-    const finalTags = Array.from(combinedTagsMap.values());
-
     return {
-      title: parsedResult.title || `Cluster: ${termStrings[0]} & Others`,
-      description: parsedResult.description || "Analysis of related search terms.",
-      tags: finalTags.slice(0, 7), // Limit final tags
+      title: parsedResult.title,
+      description: parsedResult.description,
+      tags: parsedResult.tags
     };
   } catch (error) {
-    console.error("Failed to generate cluster metadata via AI:", error);
+    console.error("Error generating cluster metadata:", error);
+    // Return basic fallback metadata
     return {
-      title: `Cluster (${terms.length} terms)`,
-      description: "Error generating AI insights for this cluster.",
-      tags: topRuleTags.map(t => ({ ...t, confidence: 0.5 })), // Fallback to rule-based tags
+      title: "Uncategorized Terms",
+      description: "A collection of related search terms",
+      tags: [{ category: "General", value: "Uncategorized", confidence: 0.1 }]
     };
   }
 }
@@ -608,25 +584,33 @@ function findOptimalEpsilon(
   let bestClusterCount = 0;
   let bestNoiseCount = embeddings.length;
 
-  for (let eps = epsilonRange.start; eps <= epsilonRange.end; eps += epsilonRange.step) {
+  // Adjust epsilon range to be more granular and allow for more clusters
+  const adjustedRange = {
+    start: 0.15, // Lower start value to allow for more distinct clusters
+    end: 0.35,   // Lower end value to prevent over-merging
+    step: 0.02   // Smaller step for more precise tuning
+  };
+
+  for (let eps = adjustedRange.start; eps <= adjustedRange.end; eps += adjustedRange.step) {
     const dbscan = new clustering.DBSCAN();
     const clusters = dbscan.run(embeddings, eps, minPts);
     const clusterCount = new Set(clusters.filter(c => c !== -1)).size;
     const noiseCount = clusters.filter(c => c === -1).length;
     
-    // Score based on:
-    // 1. Number of clusters (we want 4-8 clusters ideally)
-    // 2. Minimal noise points (but some noise is okay)
-    // 3. Reasonable cluster sizes
-    const clusterSizeScore = clusterCount > 0 ? embeddings.length / clusterCount : 0;
-    const score = (clusterCount * 10) - (noiseCount * 0.5) + (clusterSizeScore <= 10 ? 5 : 0);
+    // Adjusted scoring to favor:
+    // 1. More clusters (4-8 is ideal)
+    // 2. Balanced cluster sizes
+    // 3. Reasonable noise ratio (some noise is okay)
+    const idealClusterCount = 6;
+    const clusterCountScore = Math.max(0, 10 - Math.abs(clusterCount - idealClusterCount)) * 2;
+    const noiseRatio = noiseCount / embeddings.length;
+    const noiseScore = noiseRatio <= 0.2 ? (1 - noiseRatio) * 5 : 0;
+    
+    const score = clusterCountScore + noiseScore;
 
-    console.log(`  Result: ${clusterCount} clusters, ${noiseCount} noise points, score: ${score}`);
+    console.log(`  Epsilon ${eps.toFixed(3)}: ${clusterCount} clusters, ${noiseCount} noise (${(noiseRatio * 100).toFixed(1)}%), score: ${score.toFixed(2)}`);
 
-    if (
-      (score > bestScore && clusterCount >= 3) || // Prefer more clusters
-      (score === bestScore && noiseCount < bestNoiseCount) // If scores tie, prefer less noise
-    ) {
+    if (score > bestScore) {
       bestScore = score;
       bestEpsilon = eps;
       bestClusterCount = clusterCount;
@@ -655,25 +639,36 @@ function createCluster(terms: EmbeddingResult[], id: string, parentId?: string):
 }
 
 async function clusterEmbeddings(terms: EmbeddingResult[]): Promise<HierarchicalCluster[]> {
-  if (terms.length < 2) return [];
+  console.log(`Starting clusterEmbeddings with ${terms.length} terms`);
+  
+  if (terms.length < 2) {
+    console.warn('Not enough terms for clustering');
+    return [];
+  }
 
   const embeddings = terms.map(t => t.embedding);
-  const minPts = Math.max(2, Math.floor(Math.sqrt(terms.length / 2)));
+  // Adjust minPts to be more lenient for smaller datasets
+  const minPts = Math.max(2, Math.floor(Math.sqrt(terms.length / 3)));
   
   console.log(`Using clustering parameters: minPts=${minPts}, total points=${terms.length}`);
 
   // Find optimal epsilon
+  console.log('Finding optimal epsilon...');
   const epsilon = findOptimalEpsilon(embeddings, minPts, {
-    start: 0.25,
-    end: 0.45,
-    step: 0.05
+    start: 0.15,
+    end: 0.35,
+    step: 0.02
   });
+  console.log(`Optimal epsilon found: ${epsilon}`);
 
   // Run DBSCAN with optimal parameters
+  console.log('Running DBSCAN clustering...');
   const dbscan = new clustering.DBSCAN();
   const clusterAssignments = dbscan.run(embeddings, epsilon, minPts);
+  console.log(`DBSCAN completed with ${new Set(clusterAssignments.filter(c => c !== -1)).size} clusters and ${clusterAssignments.filter(c => c === -1).length} noise points`);
   
   // Group terms by cluster
+  console.log('Grouping terms by cluster...');
   const clusterMap = new Map<number, EmbeddingResult[]>();
   clusterAssignments.forEach((cluster, i) => {
     if (!clusterMap.has(cluster)) {
@@ -683,35 +678,54 @@ async function clusterEmbeddings(terms: EmbeddingResult[]): Promise<Hierarchical
   });
 
   // Convert clusters to hierarchical format
+  console.log('Converting clusters to hierarchical format...');
   const clusters: HierarchicalCluster[] = [];
   
   // Process non-noise clusters first
   clusterMap.forEach((clusterTerms, clusterId) => {
     if (clusterId !== -1) {
+      console.log(`Processing cluster ${clusterId} with ${clusterTerms.length} terms`);
       clusters.push(createCluster(clusterTerms, `cluster-${clusterId}`));
     }
   });
 
-  // If we have noise points, try to create meaningful sub-clusters
+  // Process noise points using semantic similarity
   const noiseTerms = clusterMap.get(-1) || [];
   if (noiseTerms.length > 0) {
-    // Try to group noise points by common patterns
-    const patterns = findCommonPatterns(noiseTerms);
-    patterns.forEach((terms, pattern) => {
-      if (terms.length >= 2) { // Only create clusters with at least 2 terms
-        clusters.push(createCluster(terms, `pattern-${pattern}`));
+    console.log(`Processing ${noiseTerms.length} noise points...`);
+    
+    // Group noise points by semantic similarity
+    const noiseGroups = new Map<string, EmbeddingResult[]>();
+    
+    for (const term of noiseTerms) {
+      let foundGroup = false;
+      
+      // Try to find a similar existing group
+      for (const [groupId, groupTerms] of noiseGroups.entries()) {
+        const similarity = cosineSimilarity(term.embedding, calculateCentroid(groupTerms));
+        if (similarity > 0.7) { // Threshold for considering terms similar
+          groupTerms.push(term);
+          foundGroup = true;
+          break;
+        }
+      }
+      
+      // If no similar group found, start a new one
+      if (!foundGroup) {
+        noiseGroups.set(`group-${noiseGroups.size}`, [term]);
+      }
+    }
+    
+    // Convert noise groups to clusters if they have enough terms
+    noiseGroups.forEach((groupTerms, groupId) => {
+      if (groupTerms.length >= 2) {
+        console.log(`Creating noise group cluster with ${groupTerms.length} terms`);
+        clusters.push(createCluster(groupTerms, `noise-${groupId}`));
       }
     });
-    
-    // Add remaining ungrouped noise points as a separate cluster
-    const ungroupedTerms = noiseTerms.filter(term => 
-      !Array.from(patterns.values()).some(patternTerms => patternTerms.includes(term))
-    );
-    if (ungroupedTerms.length > 0) {
-      clusters.push(createCluster(ungroupedTerms, 'misc'));
-    }
   }
 
+  console.log(`Final cluster count: ${clusters.length}`);
   return clusters;
 }
 
@@ -748,36 +762,37 @@ function findCommonPatterns(terms: EmbeddingResult[]): Map<string, EmbeddingResu
 function calculateOpportunityScore(volume: number, growth: number, competition: number): number {
   // Normalize inputs
   const normalizedVolume = Math.log10(Math.max(10, volume)) / 6;
-  const normalizedGrowth = Math.min(1, Math.max(0, (growth + 0.5) / 1.5));
-  const normalizedCompetition = Math.max(0, Math.min(1, competition));
-  
-  // Weighted scoring
-  const volumeWeight = 0.4;
-  const growthWeight = 0.4;
-  const competitionWeight = 0.2;
-  
-  const score = (
-    normalizedVolume * volumeWeight +
-    normalizedGrowth * growthWeight +
-    (1 - normalizedCompetition) * competitionWeight
-  ) * 100;
-  
-  return Math.round(Math.min(100, Math.max(0, score)));
+  const normalizedGrowth = Math.min(Math.max(growth, -0.5), 2) / 2.5;
+  const normalizedCompetition = Math.min(Math.max(competition, 0), 1);
+
+  // Calculate opportunity score
+  const volumeScore = normalizedVolume * 0.4;
+  const growthScore = normalizedGrowth * 0.3;
+  const competitionScore = (1 - normalizedCompetition) * 0.3;
+
+  // Combine scores and scale to 0-100
+  const opportunityScore = Math.round((volumeScore + growthScore + competitionScore) * 100);
+
+  return Math.min(100, Math.max(0, opportunityScore));
 }
 
 export async function runAIClustering(
   searchTerms: Level2SearchTermData[],
   openai: OpenAI
 ): Promise<HierarchicalCluster[]> {
+  console.log(`Starting AI clustering with ${searchTerms?.length || 0} search terms`);
+  
   if (!searchTerms?.length) {
     console.warn('No search terms provided for clustering');
     return [];
   }
 
   // Generate embeddings for search terms
+  console.log('Generating embeddings for search terms...');
   const embeddingResults: EmbeddingResult[] = [];
   for (const term of searchTerms) {
     try {
+      console.log(`Generating embedding for term: "${term.Search_Term}"`);
       const embedding = await generateEmbedding(term.Search_Term, openai);
       if (embedding) {
         embeddingResults.push({
@@ -788,18 +803,33 @@ export async function runAIClustering(
           competition: 1 - (term.Click_Share || 0), // Use inverse of click share as competition
           embedding
         });
+        console.log(`Successfully generated embedding for "${term.Search_Term}"`);
       }
     } catch (error) {
       console.error(`Error generating embedding for "${term.Search_Term}":`, error);
     }
   }
 
+  console.log(`Generated ${embeddingResults.length} valid embeddings out of ${searchTerms.length} terms`);
+
   if (embeddingResults.length < 2) {
     console.warn('Not enough valid embeddings for clustering');
     return [];
   }
 
-  return clusterEmbeddings(embeddingResults);
+  console.log('Starting DBSCAN clustering...');
+  const clusters = await clusterEmbeddings(embeddingResults);
+  console.log(`Generated ${clusters.length} clusters`);
+
+  // Log details about each cluster
+  clusters.forEach((cluster, index) => {
+    console.log(`Cluster ${index + 1}:`);
+    console.log(`- ID: ${cluster.id}`);
+    console.log(`- Number of terms: ${cluster.terms.length}`);
+    console.log(`- Terms: ${cluster.terms.map(t => t.term).join(', ')}`);
+  });
+
+  return clusters;
 }
 
 async function analyzeTemporalPatterns(
@@ -1023,59 +1053,4 @@ function cosineSimilarity(vec1: number[], vec2: number[]): number {
   const normProduct = Math.sqrt(norm1) * Math.sqrt(norm2);
   if (normProduct === 0) return 0;
   return dotProduct / normProduct;
-}
-
-function calculateOpportunityScore(volume: number, growth: number, competition: number): number {
-  // Normalize inputs
-  const normalizedVolume = Math.log10(Math.max(10, volume)) / 6;
-  const normalizedGrowth = Math.min(1, Math.max(0, (growth + 0.5) / 1.5));
-  const normalizedCompetition = Math.max(0, Math.min(1, competition));
-  
-  // Weighted scoring
-  const volumeWeight = 0.4;
-  const growthWeight = 0.4;
-  const competitionWeight = 0.2;
-  
-  const score = (
-    normalizedVolume * volumeWeight +
-    normalizedGrowth * growthWeight +
-    (1 - normalizedCompetition) * competitionWeight
-  ) * 100;
-  
-  return Math.round(Math.min(100, Math.max(0, score)));
-}
-
-// Helper function to create manual clusters from noise points
-function createManualClusters(terms: EmbeddingResult[], nClusters: number): EmbeddingResult[][] {
-  console.log(`Creating ${nClusters} manual clusters from ${terms.length} terms`);
-  
-  // Start with random seed terms as centroids
-  const centroids = Array.from({ length: nClusters }, (_, i) => 
-    terms[Math.floor(Math.random() * terms.length)].embedding
-  );
-  
-  // Simple k-means clustering
-  const clusters: EmbeddingResult[][] = Array.from({ length: nClusters }, () => []);
-  
-  // Assign each term to the nearest centroid
-  terms.forEach(term => {
-    let bestDistanceSq = Infinity;
-    let bestCluster = 0;
-    
-    centroids.forEach((centroid, i) => {
-      // Use cosine similarity for distance calculation
-      const similarity = cosineSimilarity(term.embedding, centroid);
-      const distance = 1 - similarity; // Convert similarity to distance
-      
-      if (distance < bestDistanceSq) {
-        bestDistanceSq = distance;
-        bestCluster = i;
-      }
-    });
-    
-    clusters[bestCluster].push(term);
-  });
-  
-  // Filter out any empty clusters
-  return clusters.filter(cluster => cluster.length > 0);
 } 
