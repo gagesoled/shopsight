@@ -13,6 +13,8 @@ export const Level2ProductSchema = z.object({
   Niche_Click_Count: z.number().nonnegative().optional(),
   BSR: z.number().nonnegative().optional(),
   Click_Share: z.number().min(0).max(1).optional(),
+  Features: z.string().optional(),
+  Description: z.string().optional(),
 })
 
 export type Level2ProductData = z.infer<typeof Level2ProductSchema> 

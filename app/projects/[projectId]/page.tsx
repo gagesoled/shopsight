@@ -11,10 +11,14 @@ import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/components/ui/use-toast"
 import { FileList } from "@/components/FileList"
 import { Upload } from "@/components/upload"
-import { AlertCircle, Home, ChevronRight, FileJson, FileX, FolderUp } from "lucide-react"
+import { AlertCircle, Home, ChevronRight, FileJson, FileX, FolderUp, TrendingUp } from "lucide-react"
 import { useProjectSelection } from "@/hooks/useProjectSelection"
 import { parseFile } from "@/lib/parsers/fileParser"
 import { formatDistanceToNow } from "date-fns"
+import { ProjectSettings } from "@/components/ProjectSettings"
+import { ClusterAnalysis } from "@/components/ClusterAnalysis"
+import { CombinedInsights } from "@/components/CombinedInsights"
+import type { ClusterResult, ProductClusterResult } from "@/lib/types"
 
 interface Project {
   id: string
@@ -47,6 +51,12 @@ export default function ProjectWorkspace() {
   const [activeTab, setActiveTab] = useState("files")
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null)
   const [uploadLevel, setUploadLevel] = useState<number>(1)
+  const [level2Loaded, setLevel2Loaded] = useState(false)
+  const [searchTerms, setSearchTerms] = useState<any[]>([])
+  const [products, setProducts] = useState<any[]>([])
+  const [projectSettings, setProjectSettings] = useState<any>(null)
+  const [searchTermClusters, setSearchTermClusters] = useState<ClusterResult[]>([])
+  const [productClusters, setProductClusters] = useState<ProductClusterResult[]>([])
 
   // Set the project ID in context when the page loads
   useEffect(() => {
@@ -188,6 +198,80 @@ export default function ProjectWorkspace() {
     }
   }
 
+  const handleLevel2Success = (data: any) => {
+    setLevel2Loaded(true)
+    setSearchTerms(data.searchTerms)
+    setProducts(data.products)
+  }
+
+  // Add function to fetch project settings
+  const fetchProjectSettings = async () => {
+    try {
+      const response = await fetch(`/api/projects/settings?project_id=${projectId}`)
+      if (!response.ok) {
+        throw new Error(`Failed to fetch settings: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      if (!data.success) {
+        throw new Error(data.message || "Failed to fetch settings")
+      }
+
+      setProjectSettings(data.data)
+    } catch (error) {
+      console.error("Error fetching project settings:", error)
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to fetch project settings",
+      })
+    }
+  }
+
+  // Add useEffect to fetch settings
+  useEffect(() => {
+    if (projectId) {
+      fetchProjectSettings()
+    }
+  }, [projectId])
+
+  // Add function to fetch analysis results
+  const fetchAnalysisResults = async () => {
+    try {
+      // Fetch search term clusters
+      const searchTermsResponse = await fetch(`/api/projects/analysis?project_id=${projectId}&type=search_term_clusters`)
+      if (searchTermsResponse.ok) {
+        const searchTermsData = await searchTermsResponse.json()
+        if (searchTermsData.success && searchTermsData.data) {
+          setSearchTermClusters(searchTermsData.data)
+        }
+      }
+
+      // Fetch product clusters
+      const productsResponse = await fetch(`/api/projects/analysis?project_id=${projectId}&type=product_clusters`)
+      if (productsResponse.ok) {
+        const productsData = await productsResponse.json()
+        if (productsData.success && productsData.data) {
+          setProductClusters(productsData.data)
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching analysis results:", error)
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to fetch analysis results",
+      })
+    }
+  }
+
+  // Add useEffect to fetch analysis results
+  useEffect(() => {
+    if (projectId) {
+      fetchAnalysisResults()
+    }
+  }, [projectId])
+
   return (
     <div className="container py-8">
       {/* Breadcrumb navigation */}
@@ -227,7 +311,6 @@ export default function ProjectWorkspace() {
             Created {(() => {
               try {
                 const date = new Date(project.created_at);
-                // Check if date is valid
                 if (isNaN(date.getTime())) {
                   return "Invalid date";
                 }
@@ -242,158 +325,102 @@ export default function ProjectWorkspace() {
       ) : null}
       
       {/* Main content tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-6">
-          <TabsTrigger value="files">Files & Upload</TabsTrigger>
-          <TabsTrigger value="debug">Debug View</TabsTrigger>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="files">Files</TabsTrigger>
+          <TabsTrigger value="settings">Settings</TabsTrigger>
+          <TabsTrigger value="analysis">Analysis</TabsTrigger>
+          <TabsTrigger value="insights">Insights</TabsTrigger>
         </TabsList>
-        
-        {/* Files & Upload tab */}
-        <TabsContent value="files">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Upload section */}
-            <Card className="lg:col-span-1">
-              <CardHeader>
-                <CardTitle>Upload File</CardTitle>
-                <CardDescription>
-                  Upload files for market analysis
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex flex-col space-y-1.5">
-                  <label htmlFor="level-select" className="text-sm font-medium">
-                    Select Analysis Level
-                  </label>
-                  <select 
-                    id="level-select"
-                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                    value={uploadLevel}
-                    onChange={(e) => setUploadLevel(Number(e.target.value))}
-                  >
-                    <option value={1}>Level 1 - Category Search</option>
-                    <option value={2}>Level 2 - Niche Explorer</option>
-                    <option value={3}>Level 3 - Product Keywords</option>
-                  </select>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {uploadLevel === 1 && "For top-level category analysis"}
-                    {uploadLevel === 2 && "For detailed niche behavior analysis"}
-                    {uploadLevel === 3 && "For product-level keyword optimization"}
-                  </p>
-                </div>
-                
-                <Upload
-                  onUpload={handleFileUpload}
-                  acceptedFileTypes={[".csv", ".xlsx", ".xls", ".json"]}
-                  maxSize={10}
-                  label={`Upload ${getLevelName(uploadLevel)} File`}
-                  helpText="Drag and drop your file here or click to browse"
-                  loading={fileUploading}
-                  projectId={projectId}
-                  level={uploadLevel}
-                />
-              </CardContent>
-            </Card>
-            
-            {/* Files listing section */}
-            <div className="lg:col-span-2">
-              <FileList projectId={projectId} onRefresh={fetchProjectData} />
-            </div>
+
+        <TabsContent value="files" className="space-y-6">
+          {/* File List */}
+          <div className="mb-8">
+            <FileList
+              projectId={projectId}
+              onRefresh={fetchProjectData}
+              onFileSelect={(file) => setSelectedFileId(file.id)}
+              selectedFileId={selectedFileId}
+            />
           </div>
+
+          {/* Upload component */}
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle>Upload Data</CardTitle>
+              <CardDescription>
+                Upload a CSV file with search term or product data
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Upload
+                accept=".csv,.xlsx,.xls"
+                maxSize={10}
+                endpoint="/api/upload/level2"
+                projectId={projectId}
+                level={2}
+                onSuccess={handleLevel2Success}
+              />
+            </CardContent>
+          </Card>
         </TabsContent>
-        
-        {/* Debug View tab */}
-        <TabsContent value="debug">
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            {/* Files sidebar */}
-            <Card className="lg:col-span-1 h-fit">
-              <CardHeader>
-                <CardTitle>Files</CardTitle>
-                <CardDescription>
-                  Select a file to view parsed data
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {files.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-6 text-center">
-                    <FileX className="h-10 w-10 text-muted-foreground mb-2" />
-                    <p className="text-sm text-muted-foreground">
-                      No files uploaded yet
-                    </p>
-                    <Button 
-                      variant="link" 
-                      className="mt-2"
-                      onClick={() => setActiveTab("files")}
-                    >
-                      <FolderUp className="h-4 w-4 mr-1" />
-                      Upload files
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {files.map((file) => (
-                      <Button
-                        key={file.id}
-                        variant={selectedFileId === file.id ? "default" : "outline"}
-                        className="w-full justify-start text-left"
-                        onClick={() => setSelectedFileId(file.id)}
-                      >
-                        <FileJson className="h-4 w-4 mr-2" />
-                        <div className="truncate">
-                          <div className="font-medium truncate">{file.original_filename}</div>
-                          <div className="text-xs flex items-center text-muted-foreground">
-                            <Badge variant="outline" className="text-xs">
-                              {getLevelName(file.level)}
-                            </Badge>
-                          </div>
-                        </div>
-                      </Button>
-                    ))}
-                  </div>
-                )}
+
+        <TabsContent value="settings" className="space-y-6">
+          <ProjectSettings
+            projectId={projectId}
+            onSettingsUpdate={() => {
+              fetchProjectSettings()
+              fetchProjectData()
+            }}
+          />
+        </TabsContent>
+
+        <TabsContent value="analysis" className="space-y-6">
+          {level2Loaded && projectSettings ? (
+            <ClusterAnalysis
+              projectId={projectId}
+              searchTerms={searchTerms}
+              products={products}
+              settings={projectSettings}
+            />
+          ) : (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-8">
+                <div className="rounded-full bg-muted p-3 mb-4">
+                  <FileJson className="h-8 w-8 text-muted-foreground" />
+                </div>
+                <h3 className="text-xl font-semibold mb-1">No Analysis Data</h3>
+                <p className="text-muted-foreground mb-4 text-center">
+                  Upload a Level 2 file and configure settings to run analysis
+                </p>
               </CardContent>
             </Card>
-            
-            {/* JSON viewer */}
-            <Card className="lg:col-span-3">
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <span>
-                    {getSelectedFile()
-                      ? `Data: ${getSelectedFile()?.original_filename}`
-                      : "Parsed Data"}
-                  </span>
-                  {getSelectedFile() && (
-                    <Badge variant="outline">
-                      {getLevelName(getSelectedFile()?.level || 0)}
-                    </Badge>
-                  )}
-                </CardTitle>
-                <CardDescription>
-                  {getSelectedFile()
-                    ? `Parsed with ${getSelectedFile()?.parser_version || 'v1.0'}`
-                    : "Select a file to view its parsed data"}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {!selectedFileId ? (
-                  <div className="border rounded-md p-6 bg-muted/40 text-center text-muted-foreground flex flex-col items-center justify-center min-h-[400px]">
-                    <FileJson className="h-12 w-12 mb-4 text-muted-foreground/70" />
-                    <p>Select a file from the sidebar to view its parsed data</p>
-                  </div>
-                ) : !getSelectedFile() ? (
-                  <div className="border rounded-md p-6 bg-muted/40 text-center text-muted-foreground">
-                    <p>File not found</p>
-                  </div>
-                ) : (
-                  <div className="border rounded-md p-4 bg-muted/40 overflow-auto max-h-[600px]">
-                    <pre className="text-sm font-mono">
-                      {JSON.stringify(getSelectedFile()?.parsed_json, null, 2)}
-                    </pre>
-                  </div>
-                )}
+          )}
+        </TabsContent>
+
+        <TabsContent value="insights" className="space-y-6">
+          {searchTermClusters.length > 0 && productClusters.length > 0 ? (
+            <CombinedInsights
+              projectId={projectId}
+              searchTermClusters={searchTermClusters}
+              productClusters={productClusters}
+            />
+          ) : (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-8">
+                <div className="rounded-full bg-muted p-3 mb-4">
+                  <TrendingUp className="h-8 w-8 text-muted-foreground" />
+                </div>
+                <h3 className="text-xl font-semibold mb-1">No Clusters Available</h3>
+                <p className="text-muted-foreground mb-4 text-center">
+                  Run cluster analysis first to generate insights
+                </p>
+                <Button onClick={() => setActiveTab("analysis")}>
+                  Go to Analysis
+                </Button>
               </CardContent>
             </Card>
-          </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>

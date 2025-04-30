@@ -1,4 +1,5 @@
 import type { Tag } from "../validation"
+import { sampleTagOntology } from "../tagOntology"
 
 /**
  * Apply tags to a keyword based on the provided tag rules
@@ -6,15 +7,12 @@ import type { Tag } from "../validation"
 export function applyTags(keyword: string, tags: Tag[]): Record<string, string[]> {
   const result: Record<string, string[]> = {}
   const k = keyword.toLowerCase()
-
-  console.log(`Applying tags to keyword: "${keyword}"`)
   
   if (!tags || tags.length === 0) {
-    console.warn("No tags provided for tagging - returning empty result")
     return result
   }
 
-  // Group tags by category
+  // Group tags by category only once
   const tagsByCategory = tags.reduce(
     (acc, tag) => {
       if (!acc[tag.category]) {
@@ -23,21 +21,18 @@ export function applyTags(keyword: string, tags: Tag[]): Record<string, string[]
       acc[tag.category].push(tag)
       return acc
     },
-    {} as Record<string, Tag[]>,
+    {} as Record<string, Tag[]>
   )
 
-  // Initialize result with empty arrays for each category
+  // Initialize result with empty arrays for each category found in the ontology
   Object.keys(tagsByCategory).forEach((category) => {
     result[category] = []
   })
 
   // Apply tags for each category
   Object.entries(tagsByCategory).forEach(([category, categoryTags]) => {
-    console.log(`Processing category: ${category} with ${categoryTags.length} tags`)
-    
     categoryTags.forEach((tag) => {
-      if (!tag.trigger || tag.trigger.trim() === '') {
-        console.warn(`Tag "${tag.tag}" in category "${category}" has no trigger words - skipping`)
+      if (!tag.trigger || typeof tag.trigger !== 'string' || tag.trigger.trim() === '') {
         return
       }
       
@@ -45,21 +40,28 @@ export function applyTags(keyword: string, tags: Tag[]): Record<string, string[]
       const triggers = tag.trigger.split(/[|,]/).map((t) => t.trim().toLowerCase()).filter(t => t.length > 0)
       
       if (triggers.length === 0) {
-        console.warn(`Tag "${tag.tag}" in category "${category}" has no valid triggers after splitting/trimming - skipping`)
         return
       }
 
       // Check if any trigger matches the keyword
       const matchedTrigger = triggers.find(trigger => k.includes(trigger))
       if (matchedTrigger) {
+        // Add tag only if not already present for this category
+        if (!result[category].includes(tag.tag)) {
         result[category].push(tag.tag)
-        console.log(`✓ Tag applied: ${category} - ${tag.tag} (matched trigger: "${matchedTrigger}" in "${k}")`)
+        }
       }
     })
   })
 
+  // Clean up empty categories
+  Object.keys(result).forEach(category => {
+    if (result[category].length === 0) {
+      delete result[category]
+    }
+  })
+
   const totalTagsApplied = Object.values(result).flat().length
-  console.log(`Tags applied to "${keyword}": ${totalTagsApplied} total tags across ${Object.keys(result).length} categories`, result)
   return result
 }
 
@@ -72,12 +74,19 @@ export function parseTagOntology(jsonData: any[]): Tag[] {
     return []
   }
   
-  const tags = jsonData.map((item) => ({
+  const tags = jsonData.map((item, index) => {
+    // Basic validation for each tag item
+    if (!item || typeof item.Category !== 'string' || typeof item.Tag !== 'string' || typeof item.Trigger !== 'string') {
+      console.warn(`Invalid tag structure at index ${index}:`, item)
+      return null // Mark as null to filter out later
+    }
+    return {
     category: item.Category,
     tag: item.Tag,
     trigger: item.Trigger,
-  }))
+    } as Tag // Assert type after validation
+  }).filter((tag): tag is Tag => tag !== null) // Filter out invalid entries
 
-  console.log(`Parsed ${tags.length} tags from ontology`)
+  console.log(`Parsed ${tags.length} valid tags from ontology data containing ${jsonData.length} items.`)
   return tags
 }

@@ -41,6 +41,7 @@
     "@radix-ui/react-toggle-group": "^1.1.1",
     "@radix-ui/react-tooltip": "^1.1.6",
     "@supabase/supabase-js": "^2.49.4",
+    "@types/uuid": "^10.0.0",
     "ai": "^4.3.10",
     "autoprefixer": "^10.4.20",
     "class-variance-authority": "^0.7.1",
@@ -66,6 +67,7 @@
     "sonner": "^1.7.1",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
+    "uuid": "^11.1.0",
     "vaul": "^0.9.6",
     "xlsx-js-style": "^1.2.0",
     "zod": "latest"

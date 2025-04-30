@@ -816,8 +816,8 @@ function processSearchTerms(data: any[]): ParseResult<Level2SearchTermData> {
 
       // Find click share
       const clickShareRaw = findField(item, [
-        "Click_Share", "click_share", "Click Share", "ClickShare", 
-        "CTR", "ctr", "Click Through Rate", "click_through_rate"
+        "Click_Share", "click_share", "Click Share", "CTR", "ctr", 
+        "Click Through Rate", "click_through_rate"
       ]);
       const clickShare = parseNumberValue(clickShareRaw);
 
@@ -1147,16 +1147,19 @@ function processProducts(data: any[]): ParseResult<Level2ProductData> {
   const processed: Level2ProductData[] = []
   const errors: string[] = []
 
+  console.log(`Processing ${data.length} product rows`);
+  if (data.length > 0) {
+    console.log(`First product row keys: ${Object.keys(data[0]).join(', ')}`);
+  }
+
   for (const item of data) {
     try {
-      // Debug raw values
-      console.log("Processing product row:", item)
-
       // Extract product fields with enhanced field name matching
       // Find the product name by trying various common field names
       const productNameField = findField(item, [
         "Product_Name", "product_name", "Product Name", "ProductName", 
-        "Title", "title", "Item Name", "item_name", "Name", "name"
+        "Title", "title", "Item Name", "item_name", "Name", "name",
+        "Product", "product"
       ]);
 
       // Find the ASIN/product identifier
@@ -1190,6 +1193,17 @@ function processProducts(data: any[]): ParseResult<Level2ProductData> {
         "Number of Reviews", "number_of_reviews", "Review Total", "review_total"
       ]);
       const reviewCount = parseNumberValue(reviewCountRaw);
+
+      // Find features and description 
+      const features = findField(item, [
+        "Features", "features", "Product Features", "product_features",
+        "Key Features", "key_features", "Bullet Points", "bullet_points"
+      ]);
+      
+      const description = findField(item, [
+        "Description", "description", "Product Description", "product_description",
+        "Details", "details", "Product Details", "product_details"
+      ]);
 
       // Find market share
       const marketShareRaw = findField(item, [
@@ -1226,10 +1240,11 @@ function processProducts(data: any[]): ParseResult<Level2ProductData> {
       ]);
       const clickShare = parseNumberValue(clickShareRaw);
 
+      // Create the product object
       const processedItem: Level2ProductData = {
-        ASIN: asinField,
         Product_Name: productNameField ? String(productNameField) : "",
-        Brand: brandField,
+        ASIN: asinField ? String(asinField) : undefined,
+        Brand: brandField ? String(brandField) : undefined,
         Price: price,
         Rating: rating,
         Review_Count: reviewCount,
@@ -1237,24 +1252,29 @@ function processProducts(data: any[]): ParseResult<Level2ProductData> {
         Sales_Estimate: salesEstimate,
         Niche_Click_Count: nicheClickCount,
         BSR: bsr,
-        Click_Share: clickShare
+        Click_Share: clickShare,
+        Features: features ? String(features) : undefined,
+        Description: description ? String(description) : undefined
       }
 
       // Skip products without a name
-      if (!processedItem.Product_Name) {
-        console.log("Skipping product row: Missing product name");
+      if (!processedItem.Product_Name || processedItem.Product_Name.trim() === "") {
+        console.warn("Skipping product row due to missing product name:", item);
+        errors.push(`Skipped row: Missing product name`);
         continue;
       }
 
-      // Debug processed values
-      console.log("Processed product:", processedItem)
-
-      processed.push(processedItem)
+      processed.push(processedItem);
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-      errors.push(`Error processing product: ${errorMessage}`)
-      console.error("Error processing product row:", error)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error("Error processing product row:", error, "Row data:", item);
+      errors.push(`Error processing product: ${errorMessage}`);
     }
+  }
+
+  console.log(`Successfully processed ${processed.length} products out of ${data.length} rows`);
+  if (errors.length > 0) {
+    console.warn(`Encountered ${errors.length} errors while processing products`);
   }
 
   return { data: processed, errors }

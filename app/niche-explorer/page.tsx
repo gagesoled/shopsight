@@ -14,6 +14,7 @@ import { useProjectSelection } from "@/hooks/useProjectSelection"
 import { useToast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
 import { FileList } from "@/components/FileList"
+import { NicheExplorerVisualizations } from "@/components/niche-explorer/Visualizations"
 
 interface Tag {
   category: string
@@ -420,6 +421,13 @@ export default function NicheExplorer() {
                         </CardContent>
                       </Card>
                     )}
+
+                    <NicheExplorerVisualizations
+                      searchTerms={searchTerms}
+                      clusters={clusters}
+                      products={products}
+                      nicheInsights={nicheInsights}
+                    />
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                       {clusters.map((cluster) => (
@@ -437,44 +445,52 @@ export default function NicheExplorer() {
               {/* Search Terms Tab */}
               <TabsContent value="searchTerms">
                 {searchTerms.length > 0 ? (
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="cursor-pointer" onClick={() => handleSort("Search_Term")}>
-                            Search Term
-                          </TableHead>
-                          <TableHead className="text-right cursor-pointer" onClick={() => handleSort("Volume")}>
-                            Volume
-                          </TableHead>
-                          <TableHead className="text-right cursor-pointer" onClick={() => handleSort("Growth_180")}>
-                            Growth 180d
-                          </TableHead>
-                          <TableHead className="text-right cursor-pointer" onClick={() => handleSort("Growth_90")}>
-                            Growth 90d
-                          </TableHead>
-                          <TableHead className="text-right cursor-pointer" onClick={() => handleSort("Click_Share")}>
-                            Click Share
-                          </TableHead>
-                          <TableHead className="text-right cursor-pointer" onClick={() => handleSort("Conversion_Rate")}>
-                            Conv. Rate
-                          </TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {sortedSearchTerms.map((term, i) => (
-                          <TableRow key={i}>
-                            <TableCell>{term.Search_Term}</TableCell>
-                            <TableCell className="text-right">{term.Volume?.toLocaleString() || "0"}</TableCell>
-                            <TableCell className="text-right">{term.Growth_180 !== undefined ? renderGrowthBadge(term.Growth_180) : "N/A"}</TableCell>
-                            <TableCell className="text-right">{term.Growth_90 !== undefined ? renderGrowthBadge(term.Growth_90) : "N/A"}</TableCell>
-                            <TableCell className="text-right">{formatPercentage(term.Click_Share)}</TableCell>
-                            <TableCell className="text-right">{formatPercentage(term.Conversion_Rate)}</TableCell>
+                  <>
+                    <NicheExplorerVisualizations
+                      searchTerms={searchTerms}
+                      clusters={clusters}
+                      products={products}
+                      nicheInsights={nicheInsights}
+                    />
+                    <div className="rounded-md border mt-6">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="cursor-pointer" onClick={() => handleSort("Search_Term")}>
+                              Search Term
+                            </TableHead>
+                            <TableHead className="text-right cursor-pointer" onClick={() => handleSort("Volume")}>
+                              Volume
+                            </TableHead>
+                            <TableHead className="text-right cursor-pointer" onClick={() => handleSort("Growth_180")}>
+                              Growth 180d
+                            </TableHead>
+                            <TableHead className="text-right cursor-pointer" onClick={() => handleSort("Growth_90")}>
+                              Growth 90d
+                            </TableHead>
+                            <TableHead className="text-right cursor-pointer" onClick={() => handleSort("Click_Share")}>
+                              Click Share
+                            </TableHead>
+                            <TableHead className="text-right cursor-pointer" onClick={() => handleSort("Conversion_Rate")}>
+                              Conv. Rate
+                            </TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+                        </TableHeader>
+                        <TableBody>
+                          {sortedSearchTerms.map((term, i) => (
+                            <TableRow key={i}>
+                              <TableCell>{term.Search_Term}</TableCell>
+                              <TableCell className="text-right">{term.Volume?.toLocaleString() || "0"}</TableCell>
+                              <TableCell className="text-right">{term.Growth_180 !== undefined ? renderGrowthBadge(term.Growth_180) : "N/A"}</TableCell>
+                              <TableCell className="text-right">{term.Growth_90 !== undefined ? renderGrowthBadge(term.Growth_90) : "N/A"}</TableCell>
+                              <TableCell className="text-right">{formatPercentage(term.Click_Share)}</TableCell>
+                              <TableCell className="text-right">{formatPercentage(term.Conversion_Rate)}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </>
                 ) : (
                   <div className="text-center p-8 text-muted-foreground">
                     No search terms data available in the uploaded file.
@@ -485,30 +501,38 @@ export default function NicheExplorer() {
               {/* Insights Tab */}
               <TabsContent value="insights">
                 {nicheInsights.length > 0 ? (
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Category</TableHead>
-                          <TableHead>Insight</TableHead>
-                          <TableHead>Supporting Keywords</TableHead>
-                          <TableHead className="text-right">Relevance Score</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {nicheInsights.map((insight, i) => (
-                          <TableRow key={i}>
-                            <TableCell>
-                              <Badge variant="outline">{insight.Insight_Category || "Uncategorized"}</Badge>
-                            </TableCell>
-                            <TableCell>{insight.Insight}</TableCell>
-                            <TableCell>{insight.Supporting_Keywords || "N/A"}</TableCell>
-                            <TableCell className="text-right">{insight.Relevance_Score?.toFixed(2) || "N/A"}</TableCell>
+                  <>
+                    <NicheExplorerVisualizations
+                      searchTerms={searchTerms}
+                      clusters={clusters}
+                      products={products}
+                      nicheInsights={nicheInsights}
+                    />
+                    <div className="rounded-md border mt-6">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Category</TableHead>
+                            <TableHead>Insight</TableHead>
+                            <TableHead>Supporting Keywords</TableHead>
+                            <TableHead className="text-right">Relevance Score</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+                        </TableHeader>
+                        <TableBody>
+                          {nicheInsights.map((insight, i) => (
+                            <TableRow key={i}>
+                              <TableCell>
+                                <Badge variant="outline">{insight.Insight_Category || "Uncategorized"}</Badge>
+                              </TableCell>
+                              <TableCell>{insight.Insight}</TableCell>
+                              <TableCell>{insight.Supporting_Keywords || "N/A"}</TableCell>
+                              <TableCell className="text-right">{insight.Relevance_Score?.toFixed(2) || "N/A"}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </>
                 ) : (
                   <div className="text-center p-8 text-muted-foreground">
                     No insights data available in the uploaded file.
@@ -519,44 +543,52 @@ export default function NicheExplorer() {
               {/* Products Tab */}
               <TabsContent value="products">
                 {products.length > 0 ? (
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Product</TableHead>
-                          <TableHead>Brand</TableHead>
-                          <TableHead className="text-right">Price</TableHead>
-                          <TableHead className="text-right">Rating</TableHead>
-                          <TableHead className="text-right">Reviews</TableHead>
-                          <TableHead className="text-right">Market Share</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {products.map((product, i) => (
-                          <TableRow key={i}>
-                            <TableCell>{product.Product_Name}</TableCell>
-                            <TableCell>{product.Brand || "N/A"}</TableCell>
-                            <TableCell className="text-right">${product.Price?.toFixed(2) || "N/A"}</TableCell>
-                            <TableCell className="text-right">{product.Rating?.toFixed(1) || "N/A"}</TableCell>
-                            <TableCell className="text-right">{product.Review_Count?.toLocaleString() || "N/A"}</TableCell>
-                            <TableCell className="text-right">{formatPercentage(product.Market_Share)}</TableCell>
-                            <TableCell className="text-right">
-                              {product.ASIN && (
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  onClick={() => handleSelectProduct(product.ASIN)}
-                                >
-                                  Analyze
-                                </Button>
-                              )}
-                            </TableCell>
+                  <>
+                    <NicheExplorerVisualizations
+                      searchTerms={searchTerms}
+                      clusters={clusters}
+                      products={products}
+                      nicheInsights={nicheInsights}
+                    />
+                    <div className="rounded-md border mt-6">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Product</TableHead>
+                            <TableHead>Brand</TableHead>
+                            <TableHead className="text-right">Price</TableHead>
+                            <TableHead className="text-right">Rating</TableHead>
+                            <TableHead className="text-right">Reviews</TableHead>
+                            <TableHead className="text-right">Market Share</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+                        </TableHeader>
+                        <TableBody>
+                          {products.map((product, i) => (
+                            <TableRow key={i}>
+                              <TableCell>{product.Product_Name}</TableCell>
+                              <TableCell>{product.Brand || "N/A"}</TableCell>
+                              <TableCell className="text-right">${product.Price?.toFixed(2) || "N/A"}</TableCell>
+                              <TableCell className="text-right">{product.Rating?.toFixed(1) || "N/A"}</TableCell>
+                              <TableCell className="text-right">{product.Review_Count?.toLocaleString() || "N/A"}</TableCell>
+                              <TableCell className="text-right">{formatPercentage(product.Market_Share)}</TableCell>
+                              <TableCell className="text-right">
+                                {product.ASIN && (
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    onClick={() => handleSelectProduct(product.ASIN)}
+                                  >
+                                    Analyze
+                                  </Button>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </>
                 ) : (
                   <div className="text-center p-8 text-muted-foreground">
                     No product data available in the uploaded file.
