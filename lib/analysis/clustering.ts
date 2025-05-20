@@ -1,5 +1,4 @@
-import type { Level2SearchTermData, Tag } from "../validation"
-import { applyTags } from "@/lib/analysis/tagging"
+import type { Level2SearchTermData } from "../validation"
 
 interface ClusterResult {
   id: string
@@ -16,8 +15,7 @@ interface ClusterResult {
 }
 
 /**
- * Create clusters from search terms data
- * Uses default tags for clustering when specific tags are not provided
+ * @deprecated Use AI-based clustering from ai-clustering.ts instead
  */
 export function createClusterData(searchTerms: Level2SearchTermData[]): ClusterResult[] {
   console.log(`Creating cluster data from ${searchTerms.length} search terms`);
@@ -26,47 +24,8 @@ export function createClusterData(searchTerms: Level2SearchTermData[]): ClusterR
   const sampleTerms = searchTerms.slice(0, 3).map(t => t.Search_Term);
   console.log("Sample search terms:", sampleTerms);
   
-  // Default tags for common functions, formats, and values
-  const defaultTags: Tag[] = [
-    // Function tags
-    { category: "Function", tag: "Snack", trigger: "snack,snacks,snacking,treat,treats" },
-    { category: "Function", tag: "Meal", trigger: "meal,meals,dinner,lunch,breakfast" },
-    { category: "Function", tag: "Supplement", trigger: "supplement,supplements,vitamin,vitamins,nutrition" },
-    { category: "Function", tag: "Sleep Aid", trigger: "sleep,melatonin,relaxation,rest,insomnia,night" },
-    { category: "Function", tag: "Energy", trigger: "energy,boost,caffeine,alertness,focus" },
-    { category: "Function", tag: "Health", trigger: "health,wellness,immune,immunity,healthy" },
-    
-    // Format tags
-    { category: "Format", tag: "Gummies", trigger: "gummy,gummies" },
-    { category: "Format", tag: "Capsules", trigger: "capsule,capsules,pill,pills" },
-    { category: "Format", tag: "Powder", trigger: "powder,powdered" },
-    { category: "Format", tag: "Liquid", trigger: "liquid,drink,beverage" },
-    { category: "Format", tag: "Bar", trigger: "bar,bars" },
-    { category: "Format", tag: "Chews", trigger: "chew,chews,chewable" },
-    
-    // Values tags
-    { category: "Values", tag: "Organic", trigger: "organic,natural,clean" },
-    { category: "Values", tag: "Vegan", trigger: "vegan,plant-based,plant based" },
-    { category: "Values", tag: "Non-GMO", trigger: "non-gmo,non gmo" },
-    { category: "Values", tag: "Gluten-Free", trigger: "gluten-free,gluten free,no gluten" },
-    { category: "Values", tag: "Sugar-Free", trigger: "sugar-free,sugar free,no sugar,zero sugar" },
-    { category: "Values", tag: "High Strength", trigger: "high strength,maximum strength,extra strength,strong" },
-    
-    // Brand tags - add popular brands in the domain
-    { category: "Brand", tag: "Nature Made", trigger: "nature made" },
-    { category: "Brand", tag: "Olly", trigger: "olly" },
-    { category: "Brand", tag: "Natrol", trigger: "natrol" },
-    { category: "Brand", tag: "Vitafusion", trigger: "vitafusion" },
-    { category: "Brand", tag: "ZzzQuil", trigger: "zzzquil" },
-    { category: "Brand", tag: "Dots", trigger: "dots" },
-  ];
-  
-  // Print tag info for debugging
-  console.log(`Created ${defaultTags.length} default tags`);
-  console.log(`First few tags:`, defaultTags.slice(0, 3));
-  
-  // Run clustering using default tags
-  const clusters = runClustering(searchTerms, defaultTags);
+  // Run clustering without default tags
+  const clusters = runClustering(searchTerms);
   
   // Log the result for debugging
   console.log(`Generated ${clusters.length} clusters`);
@@ -80,17 +39,14 @@ export function createClusterData(searchTerms: Level2SearchTermData[]): ClusterR
 }
 
 /**
- * Run clustering algorithm on Level 2 search term data
+ * @deprecated Use AI-based clustering from ai-clustering.ts instead
  */
-export function runClustering(data: Level2SearchTermData[], tags: Tag[]): ClusterResult[] {
-  console.log(`Running clustering on ${data.length} search terms with ${tags.length} tags`);
+export function runClustering(data: Level2SearchTermData[]): ClusterResult[] {
+  console.log(`Running clustering on ${data.length} search terms`);
   
   // Debug data
   if (data.length > 0) {
     console.log("First search term:", JSON.stringify(data[0]));
-  }
-  if (tags.length > 0) {
-    console.log("First tag:", JSON.stringify(tags[0]));
   }
 
   // Initialize clusters based on function tags
@@ -132,29 +88,23 @@ export function runClustering(data: Level2SearchTermData[], tags: Tag[]): Cluste
   let secondPassCount = 0;
   remainingItems.forEach((item) => {
     try {
-      const appliedTags = applyTags(item.Search_Term, tags)
-      
       // Prioritize Function tags for clustering
-      const functionTag = Object.entries(appliedTags).find(([category]) => category === "Function")
-      const formatTag = Object.entries(appliedTags).find(([category]) => category === "Format")
-      const valueTag = Object.entries(appliedTags).find(([category]) => category === "Values")
-
-      if (functionTag && functionTag[1].length > 0) {
-        const functionValue = functionTag[1][0]
+      if (item.Function_Inferred) {
+        const functionValue = item.Function_Inferred
         if (!functionClusters[functionValue]) {
           functionClusters[functionValue] = []
         }
         functionClusters[functionValue].push(item)
         secondPassCount++;
-      } else if (formatTag && formatTag[1].length > 0) {
-        const formatValue = formatTag[1][0]
+      } else if (item.Format_Inferred) {
+        const formatValue = item.Format_Inferred
         if (!formatClusters[formatValue]) {
           formatClusters[formatValue] = []
         }
         formatClusters[formatValue].push(item)
         secondPassCount++;
-      } else if (valueTag && valueTag[1].length > 0) {
-        const valueValue = valueTag[1][0]
+      } else if (item.Values_Inferred) {
+        const valueValue = item.Values_Inferred
         if (!valueClusters[valueValue]) {
           valueClusters[valueValue] = []
         }
@@ -162,7 +112,7 @@ export function runClustering(data: Level2SearchTermData[], tags: Tag[]): Cluste
         secondPassCount++;
       }
     } catch (error) {
-      console.error(`Error applying tags to search term "${item.Search_Term}":`, error);
+      console.error(`Error processing search term "${item.Search_Term}":`, error);
     }
   })
   console.log(`Second pass grouped ${secondPassCount} items by inferred tags`);
@@ -204,26 +154,6 @@ export function runClustering(data: Level2SearchTermData[], tags: Tag[]): Cluste
         .slice(0, 5)
         .map((item) => item.Search_Term)
 
-      // Collect all tags from items
-      const allTags: Record<string, Set<string>> = {}
-
-      items.forEach((item) => {
-        const itemTags = applyTags(item.Search_Term, tags)
-
-        Object.entries(itemTags).forEach(([category, values]) => {
-          if (!allTags[category]) {
-            allTags[category] = new Set()
-          }
-
-          values.forEach((value) => allTags[category].add(value))
-        })
-      })
-
-      // Convert tags to array format
-      const tagArray = Object.entries(allTags).flatMap(([category, values]) =>
-        Array.from(values).map((value) => ({ category, value })),
-      )
-
       // Create cluster result
       const clusterResult = {
         id: functionName.toLowerCase().replace(/\s+/g, "_"),
@@ -233,7 +163,7 @@ export function runClustering(data: Level2SearchTermData[], tags: Tag[]): Cluste
         searchVolume: totalVolume,
         clickShare: weightedClickShare,
         keywords: topKeywords,
-        tags: tagArray,
+        tags: [], // Empty tags array as we're moving to AI-based tagging
       };
       
       console.log(`Created cluster: ${clusterResult.name} with ${items.length} items, ${topKeywords.length} keywords`);
@@ -248,197 +178,66 @@ export function runClustering(data: Level2SearchTermData[], tags: Tag[]): Cluste
   Object.entries(formatClusters).forEach(([formatName, items]) => {
     if (items.length === 0) return
 
-    // Skip if all items are already in function clusters
-    const uniqueItems = items.filter((item) => !Object.values(functionClusters).flat().includes(item))
-    if (uniqueItems.length === 0) return
-
-    // Calculate metrics
-    const totalVolume = uniqueItems.reduce((sum, item) => sum + (item.Volume || 0), 0)
-    const avgVolume = totalVolume / uniqueItems.length || 0
-    const avgGrowth =
-      uniqueItems.reduce((sum, item) => {
-        const growth = item.Growth_180 !== undefined ? item.Growth_180 : (item.Growth_90 !== undefined ? item.Growth_90 : 0)
-        return sum + (growth || 0)
-      }, 0) / uniqueItems.length || 0
-
-    // Calculate click share (weighted average by volume)
-    const weightedClickShare = totalVolume === 0 ? 0 :
-      uniqueItems.reduce((sum, item) => {
-        const clickShare = item.Click_Share !== undefined ? item.Click_Share : 0
-        return sum + (clickShare * (item.Volume || 0))
-      }, 0) / totalVolume
-
-    // Simple opportunity score calculation
-    const opportunityScore = Math.min(100, Math.round((avgVolume * (1 + (avgGrowth || 0))) / 1000) || 0)
-
-    // Get top keywords by volume
-    const topKeywords = uniqueItems
-      .sort((a, b) => (b.Volume || 0) - (a.Volume || 0))
-      .slice(0, 5)
-      .map((item) => item.Search_Term)
-
-    // Collect all tags from items
-    const allTags: Record<string, Set<string>> = {}
-
-    uniqueItems.forEach((item) => {
-      const itemTags = applyTags(item.Search_Term, tags)
-
-      Object.entries(itemTags).forEach(([category, values]) => {
-        if (!allTags[category]) {
-          allTags[category] = new Set()
-        }
-
-        values.forEach((value) => allTags[category].add(value))
-      })
-    })
-
-    // Convert tags to array format
-    const tagArray = Object.entries(allTags).flatMap(([category, values]) =>
-      Array.from(values).map((value) => ({ category, value })),
-    )
-
-    // Create cluster result
-    results.push({
-      id: formatName.toLowerCase().replace(/\s+/g, "_"),
-      name: formatName,
-      description: `Keywords related to ${formatName.toLowerCase()} format`,
-      opportunityScore,
-      searchVolume: totalVolume,
-      clickShare: weightedClickShare,
-      keywords: topKeywords,
-      tags: tagArray,
-    })
-  })
-
-  // Process value clusters (tertiary)
-  console.log("Processing value clusters into result format");
-  Object.entries(valueClusters).forEach(([valueName, items]) => {
-    if (items.length === 0) return
-
-    // Skip if all items are already in function or format clusters
-    const uniqueItems = items.filter(
-      (item) =>
-        !Object.values(functionClusters).flat().includes(item) &&
-        !Object.values(formatClusters).flat().includes(item)
-    )
-    if (uniqueItems.length === 0) return
-
-    // Calculate metrics
-    const totalVolume = uniqueItems.reduce((sum, item) => sum + (item.Volume || 0), 0)
-    const avgVolume = totalVolume / uniqueItems.length || 0
-    const avgGrowth =
-      uniqueItems.reduce((sum, item) => {
-        const growth = item.Growth_180 !== undefined ? item.Growth_180 : (item.Growth_90 !== undefined ? item.Growth_90 : 0)
-        return sum + (growth || 0)
-      }, 0) / uniqueItems.length || 0
-
-    // Calculate click share (weighted average by volume)
-    const weightedClickShare = totalVolume === 0 ? 0 :
-      uniqueItems.reduce((sum, item) => {
-        const clickShare = item.Click_Share !== undefined ? item.Click_Share : 0
-        return sum + (clickShare * (item.Volume || 0))
-      }, 0) / totalVolume
-
-    // Simple opportunity score calculation
-    const opportunityScore = Math.min(100, Math.round((avgVolume * (1 + (avgGrowth || 0))) / 1000) || 0)
-
-    // Get top keywords by volume
-    const topKeywords = uniqueItems
-      .sort((a, b) => (b.Volume || 0) - (a.Volume || 0))
-      .slice(0, 5)
-      .map((item) => item.Search_Term)
-
-    // Collect all tags from items
-    const allTags: Record<string, Set<string>> = {}
-
-    uniqueItems.forEach((item) => {
-      const itemTags = applyTags(item.Search_Term, tags)
-
-      Object.entries(itemTags).forEach(([category, values]) => {
-        if (!allTags[category]) {
-          allTags[category] = new Set()
-        }
-
-        values.forEach((value) => allTags[category].add(value))
-      })
-    })
-
-    // Convert tags to array format
-    const tagArray = Object.entries(allTags).flatMap(([category, values]) =>
-      Array.from(values).map((value) => ({ category, value })),
-    )
-
-    // Create cluster result
-    results.push({
-      id: valueName.toLowerCase().replace(/\s+/g, "_"),
-      name: valueName,
-      description: `Keywords related to ${valueName.toLowerCase()} values`,
-      opportunityScore,
-      searchVolume: totalVolume,
-      clickShare: weightedClickShare,
-      keywords: topKeywords,
-      tags: tagArray,
-    })
-  })
-  
-  // Fallback: If no clusters were created, create a generic one with all terms
-  if (results.length === 0 && data.length > 0) {
-    console.log("No clusters generated, creating a fallback generic cluster with all terms");
-    
     try {
-      const totalVolume = data.reduce((sum, item) => sum + (item.Volume || 0), 0);
-      const avgGrowth = data.reduce((sum, item) => {
-        const growth = item.Growth_180 !== undefined ? item.Growth_180 : (item.Growth_90 !== undefined ? item.Growth_90 : 0);
-        return sum + (growth || 0);
-      }, 0) / data.length || 0;
-      
-      // Get top keywords by volume
-      const topKeywords = data
-        .sort((a, b) => (b.Volume || 0) - (a.Volume || 0))
-        .slice(0, 10)
-        .map((item) => item.Search_Term);
-        
-      let clusterName = "All Terms";
-      
-      // Try to infer a more specific name from top terms
-      if (topKeywords.length > 0) {
-        const firstTerm = topKeywords[0].toLowerCase();
-        if (firstTerm.includes("melatonin")) {
-          clusterName = "Melatonin Products";
-        } else if (firstTerm.includes("vitamin")) {
-          clusterName = "Vitamin Supplements";
-        } else if (firstTerm.includes("protein")) {
-          clusterName = "Protein Products";
-        }
-      }
-      
-      results.push({
-        id: "generic_cluster",
-        name: clusterName,
-        description: "Collection of all search terms in this dataset",
-        opportunityScore: Math.min(100, Math.round((totalVolume * (1 + avgGrowth)) / 1000) || 50),
-        searchVolume: totalVolume,
-        clickShare: 0.1, // Default value
-        keywords: topKeywords,
-        tags: [{category: "Format", value: "Various"}]
-      });
-      
-      console.log("Created fallback generic cluster with all terms");
-    } catch (error) {
-      console.error("Error creating fallback generic cluster:", error);
-    }
-  }
+      // Calculate metrics
+      const totalVolume = items.reduce((sum, item) => sum + (item.Volume || 0), 0)
+      const avgVolume = totalVolume / items.length || 0
+      const avgGrowth =
+        items.reduce((sum, item) => {
+          const growth = item.Growth_180 !== undefined ? item.Growth_180 : (item.Growth_90 !== undefined ? item.Growth_90 : 0)
+          return sum + (growth || 0)
+        }, 0) / items.length || 0
 
-  console.log(`Total clusters created: ${results.length}`);
-  return results
+      // Calculate click share (weighted average by volume)
+      const weightedClickShare = totalVolume === 0 ? 0 :
+        items.reduce((sum, item) => {
+          const clickShare = item.Click_Share !== undefined ? item.Click_Share : 0
+          return sum + (clickShare * (item.Volume || 0))
+        }, 0) / totalVolume
+
+      // Simple opportunity score calculation
+      const opportunityScore = Math.min(100, Math.round((avgVolume * (1 + (avgGrowth || 0))) / 1000) || 0)
+
+      // Get top keywords by volume
+      const topKeywords = items
+        .sort((a, b) => (b.Volume || 0) - (a.Volume || 0))
+        .slice(0, 5)
+        .map((item) => item.Search_Term)
+
+      // Create cluster result
+      const clusterResult = {
+        id: formatName.toLowerCase().replace(/\s+/g, "_"),
+        name: formatName,
+        description: `Keywords focused on ${formatName.toLowerCase()}`,
+        opportunityScore,
+        searchVolume: totalVolume,
+        clickShare: weightedClickShare,
+        keywords: topKeywords,
+        tags: [], // Empty tags array as we're moving to AI-based tagging
+      };
+      
+      console.log(`Created cluster: ${clusterResult.name} with ${items.length} items, ${topKeywords.length} keywords`);
+      results.push(clusterResult);
+    } catch (error) {
+      console.error(`Error processing format cluster "${formatName}":`, error);
+    }
+  })
+
+  return results;
 }
 
 /**
- * Calculate opportunity score for a cluster
+ * Calculate opportunity score based on volume, growth, and competition
  */
 export function calculateOpportunityScore(volume: number, growth: number, competition: number): number {
-  // Simple algorithm: (volume * growth) / competition
-  // Normalized to a 0-100 scale
-  const rawScore = (volume * growth) / competition
-  return Math.min(100, Math.max(0, Math.round(rawScore)))
+  // Normalize inputs
+  const normalizedVolume = Math.min(volume / 1000, 1) // Cap at 1000
+  const normalizedGrowth = Math.min(growth, 1) // Cap at 100%
+  const normalizedCompetition = Math.min(competition / 100, 1) // Cap at 100%
+
+  // Calculate base score
+  const baseScore = (normalizedVolume * (1 + normalizedGrowth)) * (1 - normalizedCompetition)
+
+  // Scale to 0-100 range
+  return Math.round(baseScore * 100)
 }
