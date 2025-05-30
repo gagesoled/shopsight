@@ -52,7 +52,12 @@ export async function POST(
 
     const { data, error } = await supabaseAdmin
       .from('niches')
-      .insert({ project_id: projectId, name: name.trim() })
+      .insert({ 
+        project_id: projectId, 
+        name: name.trim(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
       .select()
       .single();
 

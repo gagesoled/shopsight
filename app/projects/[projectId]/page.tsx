@@ -5,13 +5,14 @@ import { useParams, useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/components/ui/use-toast"
 import { FileList } from "@/components/FileList"
 import { Upload } from "@/components/upload"
-import { AlertCircle, Home, ChevronRight, FileJson, FileX, FolderUp, TrendingUp } from "lucide-react"
+import { AlertCircle, Home, ChevronRight, FileJson, FileX, FolderUp, TrendingUp, Layers, Plus, ExternalLink } from "lucide-react"
 import { useProjectSelection } from "@/hooks/useProjectSelection"
 import { parseFile } from "@/lib/parsers/fileParser"
 import { formatDistanceToNow } from "date-fns"
@@ -36,6 +37,14 @@ interface ProjectFile {
   parser_version?: string
 }
 
+interface Niche {
+  id: string
+  name: string
+  project_id: string
+  created_at: string
+  updated_at: string
+}
+
 export default function ProjectWorkspace() {
   const params = useParams()
   const router = useRouter()
@@ -57,6 +66,9 @@ export default function ProjectWorkspace() {
   const [projectSettings, setProjectSettings] = useState<any>(null)
   const [searchTermClusters, setSearchTermClusters] = useState<ClusterResult[]>([])
   const [productClusters, setProductClusters] = useState<ProductClusterResult[]>([])
+  const [niches, setNiches] = useState<Niche[]>([])
+  const [nichesLoading, setNichesLoading] = useState(false)
+  const [newNicheName, setNewNicheName] = useState("")
 
   // Set the project ID in context when the page loads
   useEffect(() => {
@@ -269,8 +281,67 @@ export default function ProjectWorkspace() {
   useEffect(() => {
     if (projectId) {
       fetchAnalysisResults()
+      fetchNiches()
     }
   }, [projectId])
+
+  // Function to fetch niches
+  const fetchNiches = async () => {
+    setNichesLoading(true)
+    try {
+      const response = await fetch(`/api/projects/${projectId}/niches`)
+      if (response.ok) {
+        const data = await response.json()
+        if (data.success) {
+          setNiches(data.data || [])
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching niches:", error)
+    } finally {
+      setNichesLoading(false)
+    }
+  }
+
+  // Function to create a new niche
+  const createNiche = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newNicheName.trim()) return
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/niches`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: newNicheName.trim() }),
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        toast({
+          title: "Success",
+          description: `Niche "${newNicheName}" created successfully.`,
+        })
+        setNewNicheName("")
+        fetchNiches() // Refresh the list
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: data.message || "Failed to create niche",
+        })
+      }
+    } catch (error) {
+      console.error("Error creating niche:", error)
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to create niche",
+      })
+    }
+  }
 
   return (
     <div className="container py-8">
@@ -328,6 +399,7 @@ export default function ProjectWorkspace() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList>
           <TabsTrigger value="files">Files</TabsTrigger>
+          <TabsTrigger value="niches">Niches</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
           <TabsTrigger value="analysis">Analysis</TabsTrigger>
           <TabsTrigger value="insights">Insights</TabsTrigger>
@@ -361,6 +433,108 @@ export default function ProjectWorkspace() {
                 level={2}
                 onSuccess={handleLevel2Success}
               />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="niches" className="space-y-6">
+          {/* Create New Niche */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Plus className="mr-2 h-5 w-5" />
+                Create New Niche
+              </CardTitle>
+              <CardDescription>
+                Create a new niche to organize your Level 2 and Level 3 data analysis
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={createNiche} className="flex gap-2">
+                <Input
+                  type="text"
+                  placeholder="Enter niche name"
+                  value={newNicheName}
+                  onChange={(e) => setNewNicheName(e.target.value)}
+                  className="flex-1"
+                />
+                <Button type="submit" disabled={!newNicheName.trim()}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* Niches List */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Layers className="mr-2 h-5 w-5" />
+                Project Niches
+              </CardTitle>
+              <CardDescription>
+                Manage and access your project niches
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {nichesLoading ? (
+                <div className="space-y-3">
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-16 w-full" />
+                </div>
+              ) : niches.length > 0 ? (
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {niches.map((niche) => (
+                    <Card key={niche.id} className="hover:shadow-md transition-shadow">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-lg">{niche.name}</CardTitle>
+                        <CardDescription>
+                          Created {formatDistanceToNow(new Date(niche.created_at), { addSuffix: true })}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => router.push(`/projects/${projectId}/niches/${niche.id}`)}
+                        >
+                          <Layers className="mr-2 h-4 w-4" />
+                          Open Niche
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => router.push(`/projects/${projectId}/niches/${niche.id}/product-keywords`)}
+                        >
+                          <ExternalLink className="mr-2 h-4 w-4" />
+                          Product Keywords
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <div className="rounded-full bg-muted p-3 mb-4 inline-flex">
+                    <Layers className="h-8 w-8 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-xl font-semibold mb-2">No Niches Yet</h3>
+                  <p className="text-muted-foreground mb-4">
+                    Create your first niche to start organizing your data analysis
+                  </p>
+                  <Button onClick={() => {
+                    const input = document.querySelector('input[placeholder="Enter niche name"]') as HTMLInputElement;
+                    input?.focus();
+                  }}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Create First Niche
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

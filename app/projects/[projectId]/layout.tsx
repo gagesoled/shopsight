@@ -7,8 +7,8 @@ export default function ProjectLayout({
 }
 
 // Generate dynamic metadata at request time
-export async function generateMetadata({ params }: { params: { projectId: string } }) {
-  const projectId = params.projectId;
+export async function generateMetadata({ params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await params;
   
   return {
     title: `Project Workspace | SoledSearch`,

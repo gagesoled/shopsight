@@ -2,11 +2,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseClient";
 import { z } from 'zod';
 
-// Define FileType enum for clarity
-const FileTypeSchema = z.enum(['search_terms', 'products'], {
-  errorMap: () => ({ message: "File type must be 'search_terms' or 'products'" })
-});
-
 // Update the Zod schema
 const UploadFileSchema = z.object({
   project_id: z.string().uuid({ message: "Invalid Project ID format" }),
@@ -16,20 +11,28 @@ const UploadFileSchema = z.object({
   parser_version: z.string().optional().default("v1.1"),
   // Add optional niche fields
   niche_id: z.string().uuid({ message: "Invalid Niche ID format" }).optional(),
-  file_type: FileTypeSchema.optional(),
+  file_type: z.string().min(1, "File type cannot be empty if provided").optional(),
 }).refine(data => {
-  // If level is 2, niche_id and file_type are required
+  if (data.level === 1) {
+    // For Level 1: niche_id should be undefined/null, file_type should be present
+    return data.niche_id === undefined && data.file_type !== undefined;
+  }
   if (data.level === 2) {
+    // For Level 2: niche_id and file_type are required
+    return data.niche_id !== undefined && data.file_type !== undefined;
+  }
+  if (data.level === 3) {
+    // For Level 3: niche_id and file_type are required
     return data.niche_id !== undefined && data.file_type !== undefined;
   }
   return true;
 }, {
-  message: "niche_id and file_type are required for Level 2 files",
-  path: ["niche_id", "file_type"], // Point error to relevant fields
+  message: "Invalid niche_id or file_type for the specified level. L1: requires file_type and no niche_id. L2/L3: require both niche_id and file_type.",
+  path: ["level"],
 });
 
 export async function POST(req: NextRequest) {
-  console.log("Entering /api/files/upload handler (Niche Update)...");
+  console.log("Entering /api/files/upload handler...");
 
   try {
     const body = await req.json();
@@ -132,9 +135,10 @@ export async function POST(req: NextRequest) {
         original_filename,
         parsed_json: parsedJsonToSave,
         parser_version,
-        // Add niche_id and file_type *only if* level is 2
-        niche_id: level === 2 ? niche_id : null,
-        file_type: level === 2 ? file_type : null,
+        // For Level 1: niche_id is null, file_type is provided
+        // For Level 2/3: both niche_id and file_type are provided
+        niche_id: level === 1 ? null : niche_id,
+        file_type: file_type,
       })
       .select()
       .single();

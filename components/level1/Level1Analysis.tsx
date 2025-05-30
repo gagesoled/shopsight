@@ -409,17 +409,7 @@ export default function Level1Analysis({ projectId, initialData, selectedFileId 
               Upload your Category Search data CSV to analyze market opportunities
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col items-center">
-            <Upload
-              onUpload={handleFileUpload}
-              acceptedFileTypes={[".csv", ".xlsx", ".xls"]}
-              maxSize={10}
-              label="Upload Category Search CSV"
-              helpText="Drag and drop your file here or click to browse"
-              loading={loading}
-              projectId={projectId}
-              level={1}
-            />
+          <CardContent className="flex flex-col items-center">            <Upload              onUpload={handleFileUpload}              acceptedFileTypes={[".csv", ".xlsx", ".xls"]}              maxSize={10}              label="Upload Category Search CSV"              helpText="Drag and drop your file here or click to browse"              loading={loading}              projectId={projectId}              level={1}              fileType="L1_Category_Overview"            />
             
             {error && (
               <Alert variant="destructive" className="mt-4">

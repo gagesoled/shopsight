@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
+import { useSearchParams } from "next/navigation"
 import { Upload } from "@/components/upload"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,6 +11,8 @@ import { Loader2, AlertCircle } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useProjectSelection } from "@/hooks/useProjectSelection"
 import { useToast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
@@ -73,10 +76,13 @@ interface Level2UploadResponseData {
   nicheInsights: NicheInsight[]
   products: Product[]
   clusters: Cluster[]
+  processingStatus: string
 }
 
 export default function NicheExplorer() {
-  const [selectedNiche, setSelectedNiche] = useState(null as string | null)
+  const searchParams = useSearchParams()
+  const [currentNicheId, setCurrentNicheId] = useState<string | null>(null)
+  const [l2FileTypeSelected, setL2FileTypeSelected] = useState<'L2_Search_Terms' | 'L2_Products'>('L2_Search_Terms')
   const [clusters, setClusters] = useState([] as Cluster[])
   const [searchTerms, setSearchTerms] = useState([] as SearchTerm[])
   const [nicheInsights, setNicheInsights] = useState([] as NicheInsight[])
@@ -88,13 +94,20 @@ export default function NicheExplorer() {
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null)
   const [sortConfig, setSortConfig] = useState(null as any)
   
+  // Background processing state
+  const [isProcessingClusters, setIsProcessingClusters] = useState(false)
+  const [processingMessage, setProcessingMessage] = useState<string | null>(null)
+  
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null)
   const [fileLoading, setFileLoading] = useState(false)
   const [fileError, setFileError] = useState<string | null>(null)
   
-  const [selectedProjectId, setSelectedProjectId] = useProjectSelection()
+  const [globalProjectId, setGlobalProjectId] = useProjectSelection()
   const { toast } = useToast()
   const router = useRouter()
+
+  // Extract query parameters
+  const [localProjectId, setLocalProjectId] = useState<string | null>(null)
 
   const sortedSearchTerms = useMemo(() => {
     if (!sortConfig) return searchTerms
@@ -139,18 +152,25 @@ export default function NicheExplorer() {
   };
 
   useEffect(() => {
-    if (!selectedProjectId && typeof window !== 'undefined') {
-      const storedId = localStorage.getItem('selectedProjectId')
-      if (storedId) setSelectedProjectId(storedId)
+    // Get projectId and nicheId from URL query parameters
+    const projectIdFromQuery = searchParams.get('projectId');
+    const nicheIdFromQuery = searchParams.get('nicheId');
+    
+    // Handle projectId - query parameter takes precedence, update global state if available
+    if (projectIdFromQuery) {
+      setLocalProjectId(projectIdFromQuery);
+      setGlobalProjectId(projectIdFromQuery); // Update global context
+    } else {
+      setLocalProjectId(globalProjectId); // Fallback to global if no query param
     }
-  }, [selectedProjectId, setSelectedProjectId])
-
-  useEffect(() => {
-    const niche = localStorage.getItem("selectedNiche")
-    if (niche) {
-      setSelectedNiche(niche)
+    
+    // Handle nicheId - set from query parameter
+    if (nicheIdFromQuery) {
+      setCurrentNicheId(nicheIdFromQuery);
+    } else {
+      setCurrentNicheId(null); // Handle missing nicheId appropriately
     }
-  }, [])
+  }, [searchParams, globalProjectId, setGlobalProjectId])
 
   const handleFileSelect = async (file: any) => {
     if (file.id === selectedFileId) return
@@ -247,12 +267,10 @@ export default function NicheExplorer() {
   }
   
   const handleFileListRefresh = () => {
-    setSelectedFileId(null)
-    setSearchTerms([])
-    setNicheInsights([])
-    setProducts([])
-    setClusters([])
     setLevel2Loaded(false)
+    // Reset processing state when file list is refreshed
+    setIsProcessingClusters(false)
+    setProcessingMessage(null)
   }
 
   const handleLevel2Success = (data: Level2UploadResponseData) => {
@@ -261,7 +279,28 @@ export default function NicheExplorer() {
     setProducts(data.products || []);
     setClusters(data.clusters || []);
     setLevel2Loaded(true);
-    toast({ title: "Success", description: "Level 2 data processed and saved." });
+    
+    // Check if this is the new background processing response
+    if (data.processingStatus === "basic_parsing_complete" && (!data.clusters || data.clusters.length === 0)) {
+      setIsProcessingClusters(true);
+      setProcessingMessage("AI enrichment and clustering are now processing in the background...");
+      
+      // Show success toast with processing info
+      toast({ 
+        title: "Upload Successful", 
+        description: "File uploaded and parsed. AI clustering is processing in the background." 
+      });
+    } else {
+      // This is the old format or already completed processing
+      setIsProcessingClusters(false);
+      setProcessingMessage(null);
+      
+      // Show regular success toast
+      toast({ 
+        title: "Success", 
+        description: "Level 2 data processed and saved." 
+      });
+    }
   }
 
   const handleSelectProduct = (asin: string | undefined) => {
@@ -318,12 +357,19 @@ export default function NicheExplorer() {
     <div className="container py-8">
       <h1 className="text-3xl font-bold mb-6 text-center">Niche Explorer</h1>
       
-      {!selectedProjectId ? (
+      {/* Debug information - remove in production */}
+      {process.env.NODE_ENV === 'development' && (localProjectId || currentNicheId) && (
+        <div className="mb-4 p-4 bg-muted rounded-lg text-sm">
+          <strong>Context:</strong> Project ID: {localProjectId || 'None'}, Niche ID: {currentNicheId || 'None'}
+        </div>
+      )}
+      
+      {!localProjectId ? (
         <Alert variant="destructive" className="mb-6">
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>No Project Selected</AlertTitle>
           <AlertDescription>
-            Please select or create a project on the home page before uploading files.
+            Please select or create a project on the home page before uploading files, or navigate with projectId in the URL.
           </AlertDescription>
         </Alert>
       ) : (
@@ -331,7 +377,7 @@ export default function NicheExplorer() {
           {/* Project Files */}
           <div className="mb-8">
             <FileList
-              projectId={selectedProjectId}
+              projectId={localProjectId}
               onRefresh={handleFileListRefresh}
               onFileSelect={handleFileSelect}
               selectedFileId={selectedFileId}
@@ -355,7 +401,11 @@ export default function NicheExplorer() {
             </Alert>
           )}
           
-          {/* Upload component */}
+          {/* Upload component now receives context from URL query parameters:
+              - projectId from query parameter (with fallback to global selection)
+              - nicheId from query parameter (nicheIdFromQuery via currentNicheId state)
+              - fileType from user selection dropdown
+              - level is fixed at 2 for this page */}
           <Card className="mb-6">
             <CardHeader>
               <CardTitle>Upload Niche Explorer Data</CardTitle>
@@ -364,12 +414,29 @@ export default function NicheExplorer() {
               </CardDescription>
             </CardHeader>
             <CardContent>
+              <div className="mb-4">
+                <Label htmlFor="l2-file-type-select">Select L2 File Type to Upload:</Label>
+                <Select
+                  value={l2FileTypeSelected}
+                  onValueChange={(value) => setL2FileTypeSelected(value as 'L2_Search_Terms' | 'L2_Products')}
+                >
+                  <SelectTrigger id="l2-file-type-select" className="w-[280px]">
+                    <SelectValue placeholder="Select L2 file type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="L2_Search_Terms">Search Terms Data</SelectItem>
+                    <SelectItem value="L2_Products">Products Data</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <Upload
                 accept=".csv,.xlsx,.xls"
                 maxSize={10}
                 endpoint="/api/upload/level2"
-                projectId={selectedProjectId}
+                projectId={localProjectId}
                 level={2}
+                nicheId={currentNicheId}
+                fileType={l2FileTypeSelected}
                 onSuccess={handleLevel2Success}
               />
             </CardContent>
@@ -427,6 +494,8 @@ export default function NicheExplorer() {
                       clusters={clusters}
                       products={products}
                       nicheInsights={nicheInsights}
+                      isProcessingClusters={isProcessingClusters}
+                      processingMessage={processingMessage}
                     />
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -451,6 +520,8 @@ export default function NicheExplorer() {
                       clusters={clusters}
                       products={products}
                       nicheInsights={nicheInsights}
+                      isProcessingClusters={isProcessingClusters}
+                      processingMessage={processingMessage}
                     />
                     <div className="rounded-md border mt-6">
                       <Table>
@@ -507,6 +578,8 @@ export default function NicheExplorer() {
                       clusters={clusters}
                       products={products}
                       nicheInsights={nicheInsights}
+                      isProcessingClusters={isProcessingClusters}
+                      processingMessage={processingMessage}
                     />
                     <div className="rounded-md border mt-6">
                       <Table>
@@ -549,6 +622,8 @@ export default function NicheExplorer() {
                       clusters={clusters}
                       products={products}
                       nicheInsights={nicheInsights}
+                      isProcessingClusters={isProcessingClusters}
+                      processingMessage={processingMessage}
                     />
                     <div className="rounded-md border mt-6">
                       <Table>

@@ -23,6 +23,8 @@ interface UploadProps {
   helpText?: string
   projectId?: string | null
   level?: number
+  nicheId?: string | null
+  fileType?: string
   additionalFields?: Record<string, string>
 }
 
@@ -50,6 +52,8 @@ export function Upload({
   helpText = "Drag and drop your file here or click to browse",
   projectId,
   level,
+  nicheId,
+  fileType,
   additionalFields = {}
 }: UploadProps) {
   const [file, setFile] = useState<File | null>(null)
@@ -148,6 +152,12 @@ export function Upload({
       if (level !== undefined) {
         formData.append("level", String(level))
       }
+      if (nicheId) {
+        formData.append("niche_id", nicheId)
+      }
+      if (fileType) {
+        formData.append("file_type", fileType)
+      }
 
       // Add any additional fields
       for (const [key, value] of Object.entries(additionalFields || {})) {
@@ -205,6 +215,11 @@ export function Upload({
       // Display warnings if available
       if (result.warnings) {
         setWarnings(result.warnings)
+      }
+
+      // Show special message for background processing
+      if (result.message && result.message.includes("background")) {
+        setWarnings(result.message)
       }
 
       setSuccess(true)
@@ -269,6 +284,14 @@ export function Upload({
       
       if (level !== undefined) {
         formData.append("level", level.toString())
+      }
+      
+      if (nicheId) {
+        formData.append("niche_id", nicheId)
+      }
+      
+      if (fileType) {
+        formData.append("file_type", fileType)
       }
 
       // Add any additional fields

@@ -52,7 +52,7 @@ export async function DELETE(
   if (!supabaseAdmin) return NextResponse.json({ success: false, message: "Database connection error" }, { status: 500 });
 
   try {
-    // Delete the niche (files FK is SET NULL)
+    // Delete the niche (associated files and clusters will be automatically deleted via CASCADE)
     const { error } = await supabaseAdmin
       .from('niches')
       .delete()

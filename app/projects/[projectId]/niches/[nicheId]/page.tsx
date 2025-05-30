@@ -1,3 +1,5 @@
+"use client"
+
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -319,26 +321,4 @@ export default function NicheDetailPage() {
         </div>
       )}
 
-      {/* Upload Dialog */}
-      {uploadLevel === 2 && selectedFileType && (
-        <UploadComponent
-          projectId={projectId}
-          level={2}
-          additionalFields={{
-            niche_id: nicheId,
-            file_type: selectedFileType
-          }}
-          onSuccess={() => {
-            setUploadLevel(null);
-            setSelectedFileType(null);
-            fetchNicheData();
-          }}
-          onCancel={() => {
-            setUploadLevel(null);
-            setSelectedFileType(null);
-          }}
-        />
-      )}
-    </div>
-  );
-} 
+                  {/* Upload Dialog */}      {uploadLevel === 2 && selectedFileType && (        <div className="space-y-4">          <div className="flex justify-between items-center">            <h3 className="text-lg font-semibold">              Upload {selectedFileType === 'search_terms' ? 'Search Terms' : 'Products'} File            </h3>            <Button              variant="outline"              onClick={() => {                setUploadLevel(null);                setSelectedFileType(null);              }}            >              Cancel            </Button>          </div>          <UploadComponent            projectId={projectId}            level={2}            additionalFields={{              niche_id: nicheId,              file_type: selectedFileType            }}            onSuccess={() => {              setUploadLevel(null);              setSelectedFileType(null);              fetchNicheData();            }}          />        </div>      )}    </div>  );} 

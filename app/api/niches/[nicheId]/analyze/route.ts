@@ -38,6 +38,7 @@ export async function POST(
 
     // Extract actual data arrays - adjust based on how you stored it in parsed_json
     const searchTermsData = searchTermsFile.parsed_json?.searchTerms || searchTermsFile.parsed_json || [];
+    const enrichedSearchTermsData = searchTermsFile.parsed_json?.enrichedSearchTerms || null;
     const productsData = productsFile.parsed_json?.products || productsFile.parsed_json || [];
 
     if (!Array.isArray(searchTermsData) || !Array.isArray(productsData)) {
@@ -46,6 +47,11 @@ export async function POST(
     }
 
     console.log(`Found ${searchTermsData.length} search terms and ${productsData.length} products.`);
+    if (enrichedSearchTermsData) {
+      console.log(`Found ${enrichedSearchTermsData.length} enriched search terms with AI-generated tags.`);
+    } else {
+      console.log("No enriched search terms data found - using regular search terms.");
+    }
 
     // 3. Call the combined analysis function
     console.log("Running combined analysis...");
@@ -63,7 +69,10 @@ export async function POST(
         project_id: (await supabaseAdmin.from('niches').select('project_id').eq('id', nicheId).single()).data?.project_id,
         niche_id: nicheId,
         type: 'niche_combined_analysis',
-        results: analysisResults,
+        results: {
+          ...analysisResults,
+          enrichedSearchTerms: enrichedSearchTermsData
+        },
         updated_at: new Date().toISOString()
       }, {
         onConflict: 'project_id,niche_id,type'
@@ -76,7 +85,15 @@ export async function POST(
       // Don't fail the whole request, maybe just log it or return a warning
     }
 
-    return NextResponse.json({ success: true, message: "Niche analysis completed.", data: analysisResults });
+    return NextResponse.json({ 
+      success: true, 
+      message: "Niche analysis completed.", 
+      data: {
+        ...analysisResults,
+        enrichedSearchTerms: enrichedSearchTermsData,
+        hasEnrichedData: !!enrichedSearchTermsData
+      }
+    });
 
   } catch (error: any) {
     console.error("Error analyzing niche:", error);

@@ -67,7 +67,7 @@ export default function ProjectDashboard() {
           if (filesResponse.ok) {
             const filesData = await filesResponse.json()
             if (filesData.success && filesData.data) {
-              const levels = [...new Set(filesData.data.map((file: any) => file.level))]
+              const levels = Array.from(new Set(filesData.data.map((file: any) => file.level as number)))
               return {
                 ...project,
                 file_count: filesData.data.length,

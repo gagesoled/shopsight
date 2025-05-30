@@ -488,11 +488,39 @@ async function generateMetadataInsights(terms: EmbeddingResult[], openai: OpenAI
   return [];
 }
 
+// Overloaded function signatures for backward compatibility
 export async function generateClusterMetadata(
   terms: EmbeddingResult[],
   openai: OpenAI
+): Promise<{ title: string; description: string; tags: Array<{ category: string; value: string; confidence?: number }> }>;
+export async function generateClusterMetadata(
+  terms: EnrichedEmbeddingResult[],
+  openai: OpenAI
+): Promise<{ title: string; description: string; tags: Array<{ category: string; value: string; confidence?: number }> }>;
+export async function generateClusterMetadata(
+  terms: EmbeddingResult[] | EnrichedEmbeddingResult[],
+  openai: OpenAI
+): Promise<{ title: string; description: string; tags: Array<{ category: string; value: string; confidence?: number }> }> {
+  // Check if terms are enriched (have ai_generated_tags)
+  const isEnriched = terms.length > 0 && 'ai_generated_tags' in terms[0];
+  
+  if (isEnriched) {
+    const enrichedTerms = terms as EnrichedEmbeddingResult[];
+    return generateEnrichedClusterMetadata(enrichedTerms, openai);
+  } else {
+    const basicTerms = terms as EmbeddingResult[];
+    return generateBasicClusterMetadata(basicTerms, openai);
+  }
+}
+
+// New enriched version (the one we just implemented)
+async function generateEnrichedClusterMetadata(
+  terms: EnrichedEmbeddingResult[],
+  openai: OpenAI
 ): Promise<{ title: string; description: string; tags: Array<{ category: string; value: string; confidence?: number }> }> {
   try {
+    console.log(`Generating cluster metadata for ${terms.length} enriched terms`);
+    
     // Prepare the terms data for the AI
     const termsData = terms.map(t => ({
       term: t.term,
@@ -502,7 +530,193 @@ export async function generateClusterMetadata(
       competition: t.competition || 0
     }));
 
-    // Create a category-agnostic prompt
+    // Analyze AI-generated tags from all terms in the cluster
+    const allAITags = terms.flatMap(term => term.ai_generated_tags);
+    console.log(`Analyzing ${allAITags.length} total AI tags across all terms`);
+    
+    // Calculate tag frequency and significance
+    const tagFrequency = new Map<string, { count: number; totalConfidence: number; category: string; value: string }>();
+    
+    allAITags.forEach(tag => {
+      const key = `${tag.category}:${tag.value}`;
+      const existing = tagFrequency.get(key);
+      const confidence = tag.confidence || 1.0;
+      
+      if (existing) {
+        existing.count += 1;
+        existing.totalConfidence += confidence;
+      } else {
+        tagFrequency.set(key, {
+          count: 1,
+          totalConfidence: confidence,
+          category: tag.category,
+          value: tag.value
+        });
+      }
+    });
+
+    // Sort tags by significance (frequency * average confidence)
+    const significantTags = Array.from(tagFrequency.entries())
+      .map(([key, data]) => ({
+        key,
+        category: data.category,
+        value: data.value,
+        frequency: data.count,
+        avgConfidence: data.totalConfidence / data.count,
+        significance: data.count * (data.totalConfidence / data.count), // frequency weighted by avg confidence
+        termCoverage: data.count / terms.length // what percentage of terms have this tag
+      }))
+      .sort((a, b) => b.significance - a.significance);
+
+    console.log(`Top 5 significant tags:`, significantTags.slice(0, 5).map(t => 
+      `${t.category}:${t.value} (freq: ${t.frequency}, confidence: ${t.avgConfidence.toFixed(2)}, coverage: ${(t.termCoverage * 100).toFixed(1)}%)`
+    ));
+
+    // Group tags by category for better analysis
+    const tagsByCategory = new Map<string, Array<{ value: string; frequency: number; avgConfidence: number; termCoverage: number }>>();
+    significantTags.forEach(tag => {
+      if (!tagsByCategory.has(tag.category)) {
+        tagsByCategory.set(tag.category, []);
+      }
+      tagsByCategory.get(tag.category)!.push({
+        value: tag.value,
+        frequency: tag.frequency,
+        avgConfidence: tag.avgConfidence,
+        termCoverage: tag.termCoverage
+      });
+    });
+
+    // Create enriched prompt that includes AI-generated tag analysis
+    const tagAnalysisSection = Array.from(tagsByCategory.entries())
+      .map(([category, values]) => {
+        const topValues = values.slice(0, 3).map(v => 
+          `"${v.value}" (${v.frequency} terms, ${(v.termCoverage * 100).toFixed(0)}% coverage, confidence: ${v.avgConfidence.toFixed(2)})`
+        ).join(', ');
+        return `- ${category}: ${topValues}`;
+      })
+      .join('\n');
+
+    const prompt = `
+You are an expert at analyzing search term patterns and identifying meaningful clusters. You have access to both the raw search terms with their metrics AND detailed AI-generated categorical analysis of each term.
+
+Based on the provided data, generate:
+
+1. A concise, descriptive 'title' (max 5 words) that captures the core theme of these search terms.
+
+2. A detailed 'description' (2-3 sentences) explaining the cluster's focus and significance. Include relevant metrics and market insights.
+
+3. Generate specific cluster-level tags by synthesizing the most common and significant patterns from the AI-generated per-term tags. Focus on the most prevalent categories and values that define this cluster's identity.
+
+SEARCH TERMS AND METRICS:
+${JSON.stringify(termsData, null, 2)}
+
+AI-GENERATED TAG ANALYSIS (Most significant patterns across all terms):
+${tagAnalysisSection}
+
+CLUSTER TAG GENERATION GUIDELINES:
+- Prioritize tags that appear across multiple terms (high coverage)
+- Focus on categories that best define the cluster's identity
+- Synthesize related values into broader cluster-level concepts when appropriate
+- Assign confidence scores based on how well-supported each tag is by the underlying data
+- Only include tags that represent the cluster as a whole, not individual term quirks
+
+Return the result in this exact JSON format:
+{
+  "title": "string",
+  "description": "string",
+  "tags": [
+    {
+      "category": "string",
+      "value": "string",
+      "confidence": number
+    }
+  ]
+}`;
+
+    console.log(`Sending enriched prompt to OpenAI for cluster metadata generation`);
+
+    // Call the AI with enriched prompt
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4-turbo",
+      messages: [
+        {
+          role: "system",
+          content: "You are an expert at analyzing search patterns and identifying meaningful clusters. Use both the raw search terms and the detailed AI-generated tag analysis to create comprehensive cluster summaries that capture the behavioral and categorical essence of the cluster."
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      response_format: { type: "json_object" }
+    });
+
+    const responseContent = completion.choices[0]?.message?.content;
+    if (!responseContent) {
+      throw new Error("No response from AI");
+    }
+
+    const parsedResult = JSON.parse(responseContent);
+    
+    console.log(`Generated enriched cluster metadata:`, {
+      title: parsedResult.title,
+      description: parsedResult.description?.substring(0, 100) + '...',
+      tagCount: parsedResult.tags?.length || 0
+    });
+
+    return {
+      title: parsedResult.title,
+      description: parsedResult.description,
+      tags: parsedResult.tags
+    };
+  } catch (error) {
+    console.error("Error generating enriched cluster metadata:", error);
+    
+    // Enhanced fallback that uses AI tags if available
+    const hasAITags = terms.some(t => t.ai_generated_tags && t.ai_generated_tags.length > 0);
+    if (hasAITags) {
+      const allTags = terms.flatMap(t => t.ai_generated_tags);
+      const commonTag = allTags.find(tag => tag.category && tag.value);
+      if (commonTag) {
+        return {
+          title: `${commonTag.value} Cluster`,
+          description: `A collection of search terms related to ${commonTag.value} with ${terms.length} total terms`,
+          tags: [{ 
+            category: commonTag.category, 
+            value: commonTag.value, 
+            confidence: 0.3 
+          }]
+        };
+      }
+    }
+    
+    // Basic fallback metadata
+    return {
+      title: "Uncategorized Terms",
+      description: "A collection of related search terms",
+      tags: [{ category: "General", value: "Uncategorized", confidence: 0.1 }]
+    };
+  }
+}
+
+// Legacy version for backward compatibility
+async function generateBasicClusterMetadata(
+  terms: EmbeddingResult[],
+  openai: OpenAI
+): Promise<{ title: string; description: string; tags: Array<{ category: string; value: string; confidence?: number }> }> {
+  try {
+    console.log(`Generating basic cluster metadata for ${terms.length} terms (legacy mode)`);
+    
+    // Prepare the terms data for the AI
+    const termsData = terms.map(t => ({
+      term: t.term,
+      volume: t.volume,
+      clickShare: t.clickShare || 0,
+      growth: t.growth || 0,
+      competition: t.competition || 0
+    }));
+
+    // Create a category-agnostic prompt (original implementation)
     const prompt = `
 You are an expert at analyzing search term patterns and identifying meaningful clusters. Based *only* on the terms and metrics provided, generate:
 
@@ -558,13 +772,20 @@ Return the result in this exact JSON format:
     }
 
     const parsedResult = JSON.parse(responseContent);
+    
+    console.log(`Generated basic cluster metadata:`, {
+      title: parsedResult.title,
+      description: parsedResult.description?.substring(0, 100) + '...',
+      tagCount: parsedResult.tags?.length || 0
+    });
+
     return {
       title: parsedResult.title,
       description: parsedResult.description,
       tags: parsedResult.tags
     };
   } catch (error) {
-    console.error("Error generating cluster metadata:", error);
+    console.error("Error generating basic cluster metadata:", error);
     // Return basic fallback metadata
     return {
       title: "Uncategorized Terms",
@@ -682,7 +903,7 @@ async function clusterEmbeddings(terms: EmbeddingResult[]): Promise<Hierarchical
   const clusters: HierarchicalCluster[] = [];
   
   // Process non-noise clusters first
-  clusterMap.forEach((clusterTerms, clusterId) => {
+  Array.from(clusterMap.entries()).forEach(([clusterId, clusterTerms]) => {
     if (clusterId !== -1) {
       console.log(`Processing cluster ${clusterId} with ${clusterTerms.length} terms`);
       clusters.push(createCluster(clusterTerms, `cluster-${clusterId}`));
@@ -701,7 +922,7 @@ async function clusterEmbeddings(terms: EmbeddingResult[]): Promise<Hierarchical
       let foundGroup = false;
       
       // Try to find a similar existing group
-      for (const [groupId, groupTerms] of noiseGroups.entries()) {
+      for (const [groupId, groupTerms] of Array.from(noiseGroups.entries())) {
         const similarity = cosineSimilarity(term.embedding, calculateCentroid(groupTerms));
         if (similarity > 0.7) { // Threshold for considering terms similar
           groupTerms.push(term);
@@ -717,7 +938,7 @@ async function clusterEmbeddings(terms: EmbeddingResult[]): Promise<Hierarchical
     }
     
     // Convert noise groups to clusters if they have enough terms
-    noiseGroups.forEach((groupTerms, groupId) => {
+    Array.from(noiseGroups.entries()).forEach(([groupId, groupTerms]) => {
       if (groupTerms.length >= 2) {
         console.log(`Creating noise group cluster with ${groupTerms.length} terms`);
         clusters.push(createCluster(groupTerms, `noise-${groupId}`));
@@ -776,11 +997,366 @@ function calculateOpportunityScore(volume: number, growth: number, competition: 
   return Math.min(100, Math.max(0, opportunityScore));
 }
 
+// Add the new enriched search term interface near the top with other interfaces
+export interface EnrichedSearchTerm {
+  term_text: string;
+  original_metrics: {
+    volume?: number;
+    clickShare?: number;
+    growth90d?: number;
+    growth180d?: number;
+    conversion_rate?: number;
+    competition?: number;
+    format_inferred?: string;
+    function_inferred?: string;
+    values_inferred?: string;
+    top_clicked_product_1_title?: string;
+    top_clicked_product_2_title?: string;
+    top_clicked_product_3_title?: string;
+  };
+  ai_generated_tags: Array<{ category: string; value: string; confidence?: number }>;
+  embedding: number[];
+}
+
+// Update the EmbeddingResult interface to work with enriched terms
+export interface EnrichedEmbeddingResult extends BaseEmbeddingResult {
+  term: string;
+  volume: number;
+  clickShare?: number;
+  growth?: number;
+  competition?: number;
+  embedding: number[];
+  // Add enriched data fields
+  original_metrics: EnrichedSearchTerm['original_metrics'];
+  ai_generated_tags: EnrichedSearchTerm['ai_generated_tags'];
+  metadata?: {
+    function?: string;
+    format?: string;
+    values?: string;
+  };
+}
+
+// Overloaded function signatures for runAIClustering backward compatibility
 export async function runAIClustering(
   searchTerms: Level2SearchTermData[],
   openai: OpenAI
+): Promise<HierarchicalCluster[]>;
+export async function runAIClustering(
+  enrichedSearchTerms: EnrichedSearchTerm[],
+  openai: OpenAI
+): Promise<HierarchicalCluster[]>;
+export async function runAIClustering(
+  searchTermsOrEnriched: Level2SearchTermData[] | EnrichedSearchTerm[],
+  openai: OpenAI
 ): Promise<HierarchicalCluster[]> {
-  console.log(`Starting AI clustering with ${searchTerms?.length || 0} search terms`);
+  // Check if input is enriched search terms
+  const isEnriched = searchTermsOrEnriched.length > 0 && 'term_text' in searchTermsOrEnriched[0];
+  
+  if (isEnriched) {
+    const enrichedSearchTerms = searchTermsOrEnriched as EnrichedSearchTerm[];
+    return runEnrichedAIClustering(enrichedSearchTerms, openai);
+  } else {
+    const searchTerms = searchTermsOrEnriched as Level2SearchTermData[];
+    return runLegacyAIClustering(searchTerms, openai);
+  }
+}
+
+// New enriched clustering implementation
+async function runEnrichedAIClustering(
+  enrichedSearchTerms: EnrichedSearchTerm[],
+  openai: OpenAI
+): Promise<HierarchicalCluster[]> {
+  console.log(`Starting AI clustering with ${enrichedSearchTerms?.length || 0} enriched search terms`);
+  
+  if (!enrichedSearchTerms?.length) {
+    console.warn('No enriched search terms provided for clustering');
+    return [];
+  }
+
+  console.log(`Received ${enrichedSearchTerms.length} enriched search terms for clustering`);
+  console.log(`Sample enriched term structure:`, {
+    term_text: enrichedSearchTerms[0]?.term_text || 'N/A',
+    has_original_metrics: !!enrichedSearchTerms[0]?.original_metrics,
+    ai_tags_count: enrichedSearchTerms[0]?.ai_generated_tags?.length || 0,
+    embedding_length: enrichedSearchTerms[0]?.embedding?.length || 0
+  });
+
+  // Convert enriched search terms to the format expected by clustering
+  console.log('Converting enriched search terms to embedding results format...');
+  const embeddingResults: EnrichedEmbeddingResult[] = [];
+  
+  for (const enrichedTerm of enrichedSearchTerms) {
+    try {
+      if (!enrichedTerm.embedding || !Array.isArray(enrichedTerm.embedding) || enrichedTerm.embedding.length === 0) {
+        console.warn(`Skipping term "${enrichedTerm.term_text}" - invalid or missing embedding`);
+        continue;
+      }
+
+      const embeddingResult: EnrichedEmbeddingResult = {
+        term: enrichedTerm.term_text,
+        volume: enrichedTerm.original_metrics.volume || 0,
+        clickShare: enrichedTerm.original_metrics.clickShare || 0,
+        growth: enrichedTerm.original_metrics.growth90d || enrichedTerm.original_metrics.growth180d || 0,
+        competition: enrichedTerm.original_metrics.competition || (1 - (enrichedTerm.original_metrics.clickShare || 0)),
+        embedding: enrichedTerm.embedding,
+        // Preserve all enriched data
+        original_metrics: enrichedTerm.original_metrics,
+        ai_generated_tags: enrichedTerm.ai_generated_tags,
+        metadata: {
+          function: enrichedTerm.original_metrics.function_inferred,
+          format: enrichedTerm.original_metrics.format_inferred,
+          values: enrichedTerm.original_metrics.values_inferred
+        }
+      };
+
+      embeddingResults.push(embeddingResult);
+      console.log(`Successfully processed enriched term: "${enrichedTerm.term_text}" with ${enrichedTerm.ai_generated_tags.length} AI tags`);
+    } catch (error) {
+      console.error(`Error processing enriched term "${enrichedTerm.term_text}":`, error);
+    }
+  }
+
+  console.log(`Successfully converted ${embeddingResults.length} enriched terms out of ${enrichedSearchTerms.length} total terms`);
+
+  if (embeddingResults.length < 2) {
+    console.warn('Not enough valid enriched terms for clustering');
+    return [];
+  }
+
+  // Extract embeddings for DBSCAN clustering
+  const embeddings = embeddingResults.map(result => result.embedding);
+  console.log(`Extracted ${embeddings.length} embeddings for clustering`);
+  
+  // Calculate clustering parameters
+  const minPts = Math.max(2, Math.floor(Math.sqrt(embeddingResults.length / 3)));
+  console.log(`DBSCAN clustering parameters: minPts=${minPts}, total points=${embeddingResults.length}`);
+
+  // Find optimal epsilon
+  console.log('Finding optimal epsilon for embedding-based clustering...');
+  const epsilon = findOptimalEpsilon(embeddings, minPts, {
+    start: 0.15,
+    end: 0.35,
+    step: 0.02
+  });
+  console.log(`Optimal epsilon found: ${epsilon}`);
+
+  // Run DBSCAN clustering
+  console.log('Starting DBSCAN clustering on embeddings...');
+  const dbscan = new clustering.DBSCAN();
+  const clusterAssignments = dbscan.run(embeddings, epsilon, minPts);
+  
+  const numClusters = new Set(clusterAssignments.filter(c => c !== -1)).size;
+  const numNoise = clusterAssignments.filter(c => c === -1).length;
+  console.log(`DBSCAN completed: ${numClusters} initial clusters formed, ${numNoise} noise points`);
+
+  // Group enriched terms by cluster
+  console.log('Grouping enriched terms by cluster assignment...');
+  const clusterMap = new Map<number, EnrichedEmbeddingResult[]>();
+  clusterAssignments.forEach((cluster, i) => {
+    if (!clusterMap.has(cluster)) {
+      clusterMap.set(cluster, []);
+    }
+    clusterMap.get(cluster)!.push(embeddingResults[i]);
+  });
+
+  // Convert clusters to hierarchical format with enriched data
+  console.log('Converting clusters to hierarchical format with enriched data...');
+  const clusters: HierarchicalCluster[] = [];
+  
+  // Process non-noise clusters first
+  Array.from(clusterMap.entries()).forEach(([clusterId, clusterTerms]) => {
+    if (clusterId !== -1) {
+      console.log(`Processing cluster ${clusterId} with ${clusterTerms.length} enriched terms`);
+      
+      const cluster = createCluster(clusterTerms, `cluster-${clusterId}`);
+      clusters.push(cluster);
+      
+      // Log sample enriched data preservation
+      console.log(`  Sample term in cluster ${clusterId}:`, {
+        term: clusterTerms[0].term,
+        ai_tags_count: clusterTerms[0].ai_generated_tags.length,
+        sample_tags: clusterTerms[0].ai_generated_tags.slice(0, 3).map(t => `${t.category}: ${t.value}`),
+        has_original_metrics: !!clusterTerms[0].original_metrics
+      });
+    }
+  });
+
+  // Process noise points using semantic similarity (with enriched data)
+  const noiseTerms = clusterMap.get(-1) || [];
+  if (noiseTerms.length > 0) {
+    console.log(`Processing ${noiseTerms.length} noise points with enriched data...`);
+    
+    // Group noise points by semantic similarity
+    const noiseGroups = new Map<string, EnrichedEmbeddingResult[]>();
+    
+    for (const term of noiseTerms) {
+      let foundGroup = false;
+      
+      // Try to find a similar existing group
+      for (const [groupId, groupTerms] of Array.from(noiseGroups.entries())) {
+        const similarity = cosineSimilarity(term.embedding, calculateCentroidFromEnriched(groupTerms));
+        if (similarity > 0.7) { // Threshold for considering terms similar
+          groupTerms.push(term);
+          foundGroup = true;
+          break;
+        }
+      }
+      
+      // If no similar group found, start a new one
+      if (!foundGroup) {
+        noiseGroups.set(`group-${noiseGroups.size}`, [term]);
+      }
+    }
+    
+    // Convert noise groups to clusters if they have enough terms
+    Array.from(noiseGroups.entries()).forEach(([groupId, groupTerms]) => {
+      if (groupTerms.length >= 2) {
+        console.log(`Creating noise group cluster with ${groupTerms.length} enriched terms`);
+        clusters.push(createCluster(groupTerms, `noise-${groupId}`));
+      }
+    });
+  }
+
+  console.log(`Final embedding-based clustering complete: ${clusters.length} clusters formed`);
+  
+  // Log details about each cluster with enriched data
+  clusters.forEach((cluster, index) => {
+    const enrichedTerms = cluster.terms as EnrichedEmbeddingResult[];
+    console.log(`Cluster ${index + 1} (${cluster.id}):`);
+    console.log(`  - Number of enriched terms: ${enrichedTerms.length}`);
+    console.log(`  - Terms: ${enrichedTerms.map(t => t.term).join(', ')}`);
+    console.log(`  - Total AI tags: ${enrichedTerms.reduce((sum, t) => sum + t.ai_generated_tags.length, 0)}`);
+    console.log(`  - Sample enriched term structure:`, {
+      term: enrichedTerms[0]?.term,
+      volume: enrichedTerms[0]?.volume,
+      ai_tags_count: enrichedTerms[0]?.ai_generated_tags?.length || 0,
+      has_original_metrics: !!enrichedTerms[0]?.original_metrics
+    });
+  });
+
+  // ===== STAGE 2: TAG-BASED CLUSTER MERGING =====
+  console.log('\n=== STAGE 2: TAG-BASED CLUSTER REFINEMENT/MERGING ===');
+  
+  if (clusters.length < 2) {
+    console.log('Not enough clusters for tag-based merging');
+    return clusters;
+  }
+  
+  const tagSimilarityThreshold = 0.6; // Threshold for merging clusters
+  const minTagConfidence = 0.5; // Minimum confidence for tags to be considered
+  console.log(`Tag similarity threshold for merging: ${tagSimilarityThreshold}`);
+  console.log(`Minimum tag confidence threshold: ${minTagConfidence}`);
+  
+  let mergedClusters = [...clusters];
+  let mergeCount = 0;
+  let iterationCount = 0;
+  const maxIterations = 10; // Prevent infinite loops
+  
+  // Iterative merging process
+  while (iterationCount < maxIterations) {
+    iterationCount++;
+    console.log(`\nTag-based merging iteration ${iterationCount}:`);
+    
+    let foundMerge = false;
+    const clustersToRemove: number[] = [];
+    const clustersToAdd: HierarchicalCluster[] = [];
+    
+    // Check all pairs of clusters for potential merging
+    for (let i = 0; i < mergedClusters.length; i++) {
+      if (clustersToRemove.includes(i)) continue;
+      
+      for (let j = i + 1; j < mergedClusters.length; j++) {
+        if (clustersToRemove.includes(j)) continue;
+        
+        const clusterA = mergedClusters[i];
+        const clusterB = mergedClusters[j];
+        
+        // Calculate tag similarity between clusters
+        const tagSimilarity = calculateClusterTagSimilarity(clusterA, clusterB, minTagConfidence);
+        
+        console.log(`  Comparing "${clusterA.id}" vs "${clusterB.id}": tag similarity = ${tagSimilarity.toFixed(3)}`);
+        
+        // If similarity exceeds threshold, merge clusters
+        if (tagSimilarity >= tagSimilarityThreshold) {
+          const newClusterId = `merged-${mergeCount + 1}`;
+          const newCluster = mergeClusters(clusterA, clusterB, newClusterId);
+          
+          console.log(`  ✓ Merging clusters "${clusterA.id}" + "${clusterB.id}" → "${newClusterId}" (similarity: ${tagSimilarity.toFixed(3)})`);
+          console.log(`    Combined terms: ${(newCluster.terms as EnrichedEmbeddingResult[]).length} total`);
+          
+          // Mark clusters for removal and add merged cluster
+          clustersToRemove.push(i, j);
+          clustersToAdd.push(newCluster);
+          
+          mergeCount++;
+          foundMerge = true;
+          break; // Process one merge per iteration to avoid index conflicts
+        }
+      }
+      
+      if (foundMerge) break; // Process one merge per iteration
+    }
+    
+    // Apply merges for this iteration
+    if (foundMerge) {
+      // Remove merged clusters (in reverse order to maintain indices)
+      clustersToRemove.sort((a, b) => b - a);
+      for (const index of clustersToRemove) {
+        mergedClusters.splice(index, 1);
+      }
+      
+      // Add new merged clusters
+      mergedClusters.push(...clustersToAdd);
+      
+      console.log(`  Iteration ${iterationCount} complete: ${clustersToRemove.length / 2} merge(s) performed`);
+      console.log(`  Current cluster count: ${mergedClusters.length}`);
+    } else {
+      console.log(`  No more clusters can be merged (threshold: ${tagSimilarityThreshold})`);
+      break;
+    }
+  }
+  
+  console.log(`\n=== TAG-BASED MERGING COMPLETE ===`);
+  console.log(`Total merging iterations: ${iterationCount}`);
+  console.log(`Total clusters merged: ${mergeCount}`);
+  console.log(`Initial clusters (embedding-based): ${clusters.length}`);
+  console.log(`Final clusters (after tag-based merging): ${mergedClusters.length}`);
+  
+  // Final cluster summary
+  console.log('\n=== FINAL CLUSTER SUMMARY ===');
+  mergedClusters.forEach((cluster, index) => {
+    const enrichedTerms = cluster.terms as EnrichedEmbeddingResult[];
+    const totalTags = enrichedTerms.reduce((sum, t) => sum + t.ai_generated_tags.length, 0);
+    const avgTagsPerTerm = (totalTags / enrichedTerms.length).toFixed(1);
+    
+    // Sample most common tags in the cluster
+    const allTags = enrichedTerms.flatMap(t => t.ai_generated_tags);
+    const tagCounts = new Map<string, number>();
+    allTags.forEach(tag => {
+      const key = `${tag.category}:${tag.value}`;
+      tagCounts.set(key, (tagCounts.get(key) || 0) + 1);
+    });
+    const topTags = Array.from(tagCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([tag, count]) => `${tag} (${count})`);
+    
+    console.log(`Final Cluster ${index + 1} (${cluster.id}):`);
+    console.log(`  - Terms: ${enrichedTerms.length} (${enrichedTerms.map(t => t.term).join(', ')})`);
+    console.log(`  - Total volume: ${enrichedTerms.reduce((sum, t) => sum + t.volume, 0).toLocaleString()}`);
+    console.log(`  - AI tags: ${totalTags} total (avg: ${avgTagsPerTerm} per term)`);
+    console.log(`  - Top tags: ${topTags.join(', ')}`);
+  });
+
+  return mergedClusters;
+}
+
+// Legacy clustering implementation for backward compatibility
+async function runLegacyAIClustering(
+  searchTerms: Level2SearchTermData[],
+  openai: OpenAI
+): Promise<HierarchicalCluster[]> {
+  console.log(`Starting legacy AI clustering with ${searchTerms?.length || 0} search terms`);
   
   if (!searchTerms?.length) {
     console.warn('No search terms provided for clustering');
@@ -1053,4 +1629,281 @@ function cosineSimilarity(vec1: number[], vec2: number[]): number {
   const normProduct = Math.sqrt(norm1) * Math.sqrt(norm2);
   if (normProduct === 0) return 0;
   return dotProduct / normProduct;
+}
+
+// Add the missing calculateCentroidFromEnriched function
+function calculateCentroidFromEnriched(terms: EnrichedEmbeddingResult[]): number[] {
+  const totalEmbeddings = terms.map(t => t.embedding);
+  const totalLength = totalEmbeddings.length;
+  const centroid = Array.from({ length: totalEmbeddings[0].length }, () => 0);
+
+  for (const embedding of totalEmbeddings) {
+    for (let i = 0; i < embedding.length; i++) {
+      centroid[i] += embedding[i] / totalLength;
+    }
+  }
+
+  return centroid;
+}
+
+/**
+ * Enriches a search term with AI-generated tags using OpenAI's chat completions API.
+ * Analyzes the search term and extracts relevant attributes, user intents, product characteristics,
+ * and other discernible signals, categorizing them into predefined categories.
+ */
+export async function enrichSearchTermWithAITags(
+  searchTerm: string,
+  originalMetrics: {
+    volume?: number;
+    clickShare?: number;
+    growth90d?: number;
+    growth180d?: number;
+    conversion_rate?: number;
+    competition?: number;
+    format_inferred?: string;
+    function_inferred?: string;
+    values_inferred?: string;
+    top_clicked_product_1_title?: string;
+    top_clicked_product_2_title?: string;
+    top_clicked_product_3_title?: string;
+  },
+  openai: OpenAI
+): Promise<{
+  term_text: string;
+  original_metrics: any;
+  ai_generated_tags: Array<{ category: string; value: string; confidence?: number }>;
+}> {
+  console.log(`Starting AI tag enrichment for search term: "${searchTerm}"`);
+  console.log(`Original metrics:`, originalMetrics);
+
+  try {
+    // Construct detailed prompt for OpenAI
+    const prompt = `You are an expert e-commerce market analyst. Analyze the provided e-commerce search term (and its associated original metrics for context). Your goal is to extract all relevant attributes, user intents, product characteristics, and any other discernible signals from this search term.
+
+Categorize these extracted pieces of information under the following predefined categories. For each piece of information, assign it to the most appropriate category and provide a specific 'value'. If multiple distinct pieces of information fit under the same category for this single search term, list them as separate tag objects (e.g., two different 'Key_Feature_Or_Attribute' tags).
+
+If a category is not relevant to the given search term, do not include a tag for that category.
+
+Also, assign a 'confidence' score (a float between 0.0 and 1.0) indicating how certain you are about each specific tag you generate.
+
+The predefined categories are:
+- Identified_Object: The primary product, service, entity, or core concept.
+- Semantic_Synonyms_Or_Aliases: Alternative names, colloquialisms, or broader categorical terms for the Identified_Object.
+- Brand: Specific brand names.
+- Key_Feature_Or_Attribute: Specific, objective characteristics or features.
+- Format_Or_Type: Physical form, delivery method, or specific variant.
+- Target_Audience_Or_User: Specific user group or demographic.
+- Function_Or_Purpose: What the user is trying to achieve or the object's utility.
+- Implied_Benefit_Or_Problem_Solved: The underlying need or desired outcome.
+- Ingredient_Or_Component: Specific ingredients or materials.
+- Usage_Occasion_Or_Context: When, where, or how the object is used.
+- Qualifier_Or_Sentiment: Words that describe, modify, or express opinion/sentiment.
+- Problem_Or_Pain_Point: Specific problem or ailment the user is trying to solve.
+- Comparison_Or_Alternative: If the term implies comparison or seeks an alternative.
+- Location_Or_Geography: Geographic context.
+- LLM_Derived_Insight: A concise (1-2 phrase) qualitative insight or interpretation about the user's deeper intent or nuance not captured by other categories.
+- Other_Descriptor: Miscellaneous but relevant descriptors not fitting elsewhere.
+
+Your output MUST be a valid JSON array of tag objects. Each object in the array should have a 'category' (from the predefined list), a 'value' (the extracted information), and a 'confidence' score.
+
+Example format:
+[
+  { "category": "Brand", "value": "Dots Pretzels", "confidence": 0.95 },
+  { "category": "Format_Or_Type", "value": "Individual Bags", "confidence": 0.9 },
+  { "category": "Key_Feature_Or_Attribute", "value": "Seasoned", "confidence": 0.85 }
+]
+
+Search Term to Analyze: "${searchTerm}"
+
+Context Metrics:
+- Search Volume: ${originalMetrics.volume || 'N/A'}
+- Click Share: ${originalMetrics.clickShare ? (originalMetrics.clickShare * 100).toFixed(1) + '%' : 'N/A'}
+- Growth (90d): ${originalMetrics.growth90d ? (originalMetrics.growth90d * 100).toFixed(1) + '%' : 'N/A'}
+- Growth (180d): ${originalMetrics.growth180d ? (originalMetrics.growth180d * 100).toFixed(1) + '%' : 'N/A'}
+- Conversion Rate: ${originalMetrics.conversion_rate ? (originalMetrics.conversion_rate * 100).toFixed(1) + '%' : 'N/A'}
+- Competition: ${originalMetrics.competition || 'N/A'}
+- Format Inferred: ${originalMetrics.format_inferred || 'N/A'}
+- Function Inferred: ${originalMetrics.function_inferred || 'N/A'}
+- Values Inferred: ${originalMetrics.values_inferred || 'N/A'}
+- Top Clicked Products: ${[
+      originalMetrics.top_clicked_product_1_title,
+      originalMetrics.top_clicked_product_2_title,
+      originalMetrics.top_clicked_product_3_title
+    ].filter(Boolean).join(', ') || 'N/A'}
+
+Analyze the search term and return only the JSON array of tags.`;
+
+    console.log(`Sending prompt to OpenAI for term: "${searchTerm}"`);
+    console.log(`Prompt:`, prompt);
+
+    // Make API call to OpenAI
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "system",
+          content: "You are an expert e-commerce market analyst. Analyze search terms and extract relevant attributes, categorizing them into predefined categories. Always respond with valid JSON arrays only."
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.1, // Lower temperature for more consistent results
+    });
+
+    console.log(`Received response from OpenAI for term: "${searchTerm}"`);
+    const responseContent = completion.choices[0]?.message?.content;
+    console.log(`Raw OpenAI response:`, responseContent);
+
+    if (!responseContent) {
+      console.error(`No response content from OpenAI for term: "${searchTerm}"`);
+      return {
+        term_text: searchTerm,
+        original_metrics: originalMetrics,
+        ai_generated_tags: []
+      };
+    }
+
+    // Parse the JSON response
+    let parsedResponse;
+    try {
+      parsedResponse = JSON.parse(responseContent);
+    } catch (parseError) {
+      console.error(`Failed to parse JSON response for term "${searchTerm}":`, parseError);
+      console.error(`Problematic response:`, responseContent);
+      return {
+        term_text: searchTerm,
+        original_metrics: originalMetrics,
+        ai_generated_tags: []
+      };
+    }
+
+    // Extract the tags array from the response
+    let tags: Array<{ category: string; value: string; confidence?: number }> = [];
+    
+    if (Array.isArray(parsedResponse)) {
+      // Response is directly an array
+      tags = parsedResponse;
+    } else if (parsedResponse.tags && Array.isArray(parsedResponse.tags)) {
+      // Response is an object with a tags property
+      tags = parsedResponse.tags;
+    } else if (parsedResponse.ai_generated_tags && Array.isArray(parsedResponse.ai_generated_tags)) {
+      // Response is an object with ai_generated_tags property
+      tags = parsedResponse.ai_generated_tags;
+    } else {
+      console.error(`Unexpected response format for term "${searchTerm}":`, parsedResponse);
+      return {
+        term_text: searchTerm,
+        original_metrics: originalMetrics,
+        ai_generated_tags: []
+      };
+    }
+
+    // Validate tags format
+    const validTags = tags.filter(tag => {
+      if (typeof tag !== 'object' || !tag.category || !tag.value) {
+        console.warn(`Invalid tag format for term "${searchTerm}":`, tag);
+        return false;
+      }
+      return true;
+    });
+
+    console.log(`Successfully generated ${validTags.length} tags for term: "${searchTerm}"`);
+    console.log(`Final AI generated tags:`, validTags);
+
+    return {
+      term_text: searchTerm,
+      original_metrics: originalMetrics,
+      ai_generated_tags: validTags
+    };
+
+  } catch (error) {
+    console.error(`Error enriching search term "${searchTerm}" with AI tags:`, error);
+    return {
+      term_text: searchTerm,
+      original_metrics: originalMetrics,
+      ai_generated_tags: []
+    };
+  }
+}
+
+// Add tag similarity calculation helper function
+function calculateTagSetSimilarity(
+  tagsA: Array<{ category: string; value: string; confidence?: number }>,
+  tagsB: Array<{ category: string; value: string; confidence?: number }>,
+  minConfidence: number = 0.5
+): number {
+  // Filter tags by confidence threshold
+  const filteredTagsA = tagsA.filter(tag => (tag.confidence || 1.0) >= minConfidence);
+  const filteredTagsB = tagsB.filter(tag => (tag.confidence || 1.0) >= minConfidence);
+  
+  if (filteredTagsA.length === 0 && filteredTagsB.length === 0) {
+    return 1.0; // Both empty, consider them similar
+  }
+  
+  if (filteredTagsA.length === 0 || filteredTagsB.length === 0) {
+    return 0.0; // One empty, one not
+  }
+  
+  // Create sets of category:value pairs for Jaccard calculation
+  const setA = new Set(filteredTagsA.map(tag => `${tag.category}:${tag.value}`));
+  const setB = new Set(filteredTagsB.map(tag => `${tag.category}:${tag.value}`));
+  
+  // Calculate Jaccard Index: |A ∩ B| / |A ∪ B|
+  const intersection = new Set(Array.from(setA).filter(x => setB.has(x)));
+  const union = new Set([...Array.from(setA), ...Array.from(setB)]);
+  
+  return intersection.size / union.size;
+}
+
+// Add cluster tag similarity calculation
+function calculateClusterTagSimilarity(
+  clusterA: HierarchicalCluster,
+  clusterB: HierarchicalCluster,
+  minConfidence: number = 0.5
+): number {
+  const termsA = clusterA.terms as EnrichedEmbeddingResult[];
+  const termsB = clusterB.terms as EnrichedEmbeddingResult[];
+  
+  // Collect all unique tags from each cluster
+  const allTagsA = termsA.flatMap(term => term.ai_generated_tags);
+  const allTagsB = termsB.flatMap(term => term.ai_generated_tags);
+  
+  // Remove duplicates and create unique tag sets per cluster
+  const uniqueTagsA = Array.from(
+    new Map(allTagsA.map(tag => [`${tag.category}:${tag.value}`, tag])).values()
+  );
+  const uniqueTagsB = Array.from(
+    new Map(allTagsB.map(tag => [`${tag.category}:${tag.value}`, tag])).values()
+  );
+  
+  return calculateTagSetSimilarity(uniqueTagsA, uniqueTagsB, minConfidence);
+}
+
+// Add cluster merging helper function
+function mergeClusters(
+  clusterA: HierarchicalCluster,
+  clusterB: HierarchicalCluster,
+  newId: string
+): HierarchicalCluster {
+  const termsA = clusterA.terms as EnrichedEmbeddingResult[];
+  const termsB = clusterB.terms as EnrichedEmbeddingResult[];
+  
+  // Combine all terms (no duplicates expected from DBSCAN)
+  const mergedTerms = [...termsA, ...termsB];
+  
+  // Create merged cluster
+  const mergedCluster = createCluster(mergedTerms, newId);
+  
+  // Update metadata to reflect merged nature
+  if (mergedCluster.metadataAnalysis) {
+    mergedCluster.metadataAnalysis.volume = mergedTerms.reduce((sum, t) => sum + t.volume, 0);
+    mergedCluster.metadataAnalysis.growth = mergedTerms.reduce((sum, t) => sum + (t.growth || 0), 0) / mergedTerms.length;
+    mergedCluster.metadataAnalysis.competition = mergedTerms.reduce((sum, t) => sum + (t.competition || 0), 0) / mergedTerms.length;
+    mergedCluster.metadataAnalysis.terms = mergedTerms.map(t => t.term);
+  }
+  
+  return mergedCluster;
 } 

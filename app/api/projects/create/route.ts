@@ -29,6 +29,7 @@ const ProjectSettingsSchema = z.object({
 // Define the request body schema
 const CreateProjectSchema = z.object({
   name: z.string().min(1, "Project name is required"),
+  target_category_description: z.string().min(1, "Target category description cannot be empty if provided").optional(),
   settings: ProjectSettingsSchema.optional(),
 });
 
@@ -55,9 +56,10 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    const { name, settings } = validation.data;
+    const { name, target_category_description, settings } = validation.data;
 
     console.log(`Attempting to create project with name: "${name.trim()}"`);
+    console.log(`Target category description: "${target_category_description || 'None provided'}"`);
 
     console.log("Checking Supabase client status...");
     if (!supabaseAdmin) {
@@ -70,6 +72,7 @@ export async function POST(req: NextRequest) {
       .from('projects') // Make sure 'projects' matches your table name
       .insert({ 
         name: name.trim(),
+        target_category_description: target_category_description || null,
         settings: settings || {
           maxClusters: 6,
           minClusterSize: 3,

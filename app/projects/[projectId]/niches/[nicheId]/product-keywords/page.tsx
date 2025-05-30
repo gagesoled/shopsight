@@ -5,7 +5,8 @@ import { Upload } from "@/components/upload"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Level3DataView } from "@/components/level3-data-view"
-import { useSearchParams, useRouter } from "next/navigation"
+import { useParams, useSearchParams, useRouter } from "next/navigation"
+import { useProjectSelection } from "@/hooks/useProjectSelection"
 
 interface Level3DataItem {
   ASIN: string
@@ -51,17 +52,27 @@ export default function ProductKeywords() {
   const [level3Loaded, setLevel3Loaded] = useState(false)
   const [selectedAsin, setSelectedAsin] = useState<string | null>(null)
   const [filteredData, setFilteredData] = useState<Level3DataItem[]>([])
+  const [productName, setProductName] = useState<string>("")
   
+  const params = useParams()
   const searchParams = useSearchParams()
   const router = useRouter()
   
+  const projectIdFromPath = params.projectId as string
+  const nicheIdFromPath = params.nicheId as string
+  const asinFromQuery = searchParams.get("asin")
+  
+  const [_, setSelectedProjectIdGlobal] = useProjectSelection()
+  
   useEffect(() => {
-    // Check if an ASIN was passed in the URL
-    const asin = searchParams.get('asin')
-    if (asin) {
-      setSelectedAsin(asin)
+    if (projectIdFromPath) {
+      setSelectedProjectIdGlobal(projectIdFromPath)
     }
-  }, [searchParams])
+    if (asinFromQuery) {
+      setSelectedAsin(asinFromQuery)
+      setProductName(`Product ${asinFromQuery}`)
+    }
+  }, [projectIdFromPath, asinFromQuery, setSelectedProjectIdGlobal])
   
   useEffect(() => {
     // Filter data when selectedAsin or level3Data changes
@@ -94,15 +105,15 @@ export default function ProductKeywords() {
   
   const handleSelectAsin = (asin: string) => {
     setSelectedAsin(asin)
-    // Update URL with the selected ASIN
-    router.push(`/product-keywords?asin=${asin}`)
+    // Update URL with the selected ASIN while maintaining the dynamic route structure
+    router.push(`/projects/${projectIdFromPath}/niches/${nicheIdFromPath}/product-keywords?asin=${asin}`)
   }
   
   const clearAsinFilter = () => {
     setSelectedAsin(null)
     setFilteredData(level3Data)
-    // Remove ASIN from URL
-    router.push('/product-keywords')
+    // Remove ASIN from URL while maintaining the dynamic route structure
+    router.push(`/projects/${projectIdFromPath}/niches/${nicheIdFromPath}/product-keywords`)
   }
 
   return (
@@ -130,6 +141,10 @@ export default function ProductKeywords() {
               acceptedFileTypes={[".xlsx", ".xls", ".csv"]}
               maxSize={5}
               onSuccess={handleLevel3Success}
+              projectId={projectIdFromPath}
+              level={3}
+              nicheId={nicheIdFromPath}
+              fileType="L3_Cerebro"
             />
           </CardContent>
         </Card>
@@ -174,8 +189,8 @@ export default function ProductKeywords() {
         <Button variant="outline" onClick={() => window.location.href = "/"}>
           Back to Home
         </Button>
-        <Button variant="outline" onClick={() => window.location.href = "/niche-explorer"}>
-          Niche Explorer
+        <Button variant="outline" onClick={() => window.location.href = `/projects/${projectIdFromPath}`}>
+          Back to Project
         </Button>
       </div>
     </main>
